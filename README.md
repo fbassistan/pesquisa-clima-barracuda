@@ -1,1 +1,3 @@
-# pesquisa-clima-barracuda
+streamlit
+pandas
+extra-streamlit-components
