@@ -12,7 +12,7 @@ st.set_page_config(page_title="Pesquisa de Clima Barracuda", page_icon="🏨", l
 URL_WEB_APP = "https://script.google.com/macros/s/AKfycbzvxIXvcisyDL5ljMD8gSwYwKhF_bFdvKtG2M-_D1G7Rv26-TfFd-vYR-zxJ0PNIU-XtA/exec"
 SENHA_ADMIN = "BARRACUDA_RH_2026"
 
-cookie_manager = stx.get_cookie_manager()
+cookie_manager = stx.CookieManager()
 
 # Mapeamento estático das escalas para manter o app rápido e leve
 ESCALAS_MAPEAMENTO = {
