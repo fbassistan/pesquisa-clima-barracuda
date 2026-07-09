@@ -122,7 +122,7 @@ with aba_pesquisa:
                     )
                     st.session_state.respostas[q_key] = resposta_texto
                 
-                st.markdown("<br>", unsafe_url_escape=False)
+                st.write("")
             
             # Botões de Navegação Inferiores
             st.markdown("---")
