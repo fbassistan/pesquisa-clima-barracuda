@@ -79,7 +79,7 @@ aba_pesquisa, aba_admin = st.tabs(["📝 Responder Pesquisa", "⚙️ Painel de 
 with aba_pesquisa:
     if cookie_manager:
         # Lê o cookie para saber se este navegador já respondeu ESTA rodada específica
-        cookie_status = cookie_manager.get(rectype=RODADA_ATUAL)
+        cookie_status = cookie_manager.get(RODADA_ATUAL)
         
         if cookie_status == "respondido":
             st.warning("### ⚠️ Participação já registrada!")
