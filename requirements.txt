@@ -1,3 +1,3 @@
 streamlit
 pandas
-extra-streamlit-components
+extra_streamlit_components
