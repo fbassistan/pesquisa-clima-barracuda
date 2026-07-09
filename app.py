@@ -10,7 +10,7 @@ st.set_page_config(page_title="Pesquisa de Clima Barracuda", page_icon="🏨", l
 
 # ➔ COLE AQUI A SUA URL GERADA NO GOOGLE SCRIPTS (Terminada em /exec)
 URL_WEB_APP = "https://script.google.com/macros/s/AKfycbzvxIXvcisyDL5ljMD8gSwYwKhF_bFdvKtG2M-_D1G7Rv26-TfFd-vYR-zxJ0PNIU-XtA/exec"
-SENHA_ADMIN = "BARRACUDA_RH_2026"
+SENHA_ADMIN = "BARRACUDARH2026"
 
 cookie_manager = stx.CookieManager()
 
