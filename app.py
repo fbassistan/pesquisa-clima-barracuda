@@ -187,7 +187,7 @@ with aba_admin:
     
     if senha == SENHA_ADMIN:
         st.write(f"**Identificador da Pesquisa Atual:** `{RODADA_ATUAL}`")
-        if st.button("🔄 Resetar Pesquisa (Iniciar Nova Rodada)", type="danger", use_container_width=True):
+        if st.button("🔄 Resetar Pesquisa (Iniciar Nova Rodada)", type="primary", use_container_width=True):
             try:
                 payload_reset = {"acao": "virar_rodada_pesquisa"}
                 req = urllib.request.Request(
