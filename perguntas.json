@@ -1,0 +1,52 @@
+[
+  {"id": 2, "bloco": "Cultura da Organização", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Eu me identifico com a missão do Barracuda."},
+  {"id": 3, "bloco": "Cultura da Organização", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Considero que o Barracuda é comprometido com as questões sociais e ambientais de Itacaré."},
+  {"id": 4, "bloco": "Cultura da Organização", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Tenho interesse em participar dos projetos do Instituto Yandê Itacaré."},
+  {"id": 5, "bloco": "Cultura da Organização", "tipo": "escala", "escala_tipo": "frequencia", "texto": "O dia a dia de trabalho é agradável para mim."},
+  {"id": 6, "bloco": "Cultura da Organização", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Sinto que o trabalho impacta minha vida pessoal."},
+  {"id": 7, "bloco": "Cultura da Organização", "tipo": "aberta", "escala_tipo": "-", "texto": "Se a resposta da pergunta anterior for sim, de que forma o trabalho impacta sua vida pessoal?"},
+  {"id": 8, "bloco": "Cultura da Organização", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Me sinto pertencente à Tribo Barracuda."},
+  {"id": 9, "bloco": "Cultura da Organização", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Com que frequência eu percebo algum tipo de hostilidade no ambiente de trabalho?"},
+  {"id": 10, "bloco": "Cultura da Organização", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Eu sinto que posso confiar nos meus colegas de trabalho."},
+  {"id": 11, "bloco": "Cultura da Organização", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Meus colegas de trabalho me ajudam quando eu preciso."},
+  {"id": 12, "bloco": "Cultura da Organização", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Tenho laços de amizade com colegas de trabalho."},
+  
+  {"id": 13, "bloco": "Postura da Liderança Direta", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Com que frequência eu percebo que meu líder é claro e objetivo nas funções que delega?"},
+  {"id": 14, "bloco": "Postura da Liderança Direta", "tipo": "escala", "escala_tipo": "frequencia", "texto": "A comunicação entre mim e meu líder é satisfatória."},
+  {"id": 15, "bloco": "Postura da Liderança Direta", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Acredito que meu líder reconhece meu potencial."},
+  {"id": 16, "bloco": "Postura da Liderança Direta", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Minhas entregas são valorizadas pelo meu líder?"},
+  {"id": 17, "bloco": "Postura da Liderança Direta", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Com que frequência me sinto à vontade para pedir feedbacks ou desabafar com meu líder?"},
+  {"id": 18, "bloco": "Postura da Liderança Direta", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Sinto que minha opinião é levada em consideração nas decisões."},
+  {"id": 19, "bloco": "Postura da Liderança Direta", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Meu líder me oferece o suporte necessário para realizar meu trabalho."},
+  {"id": 20, "bloco": "Postura da Liderança Direta", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Sinto que meu líder me estimula a aprender e a desenvolver minha carreira?"},
+  
+  {"id": 21, "bloco": "Funções Desempenhadas", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Com que frequência estou satisfeito com as funções que desempenho no meu dia a dia?"},
+  {"id": 22, "bloco": "Funções Desempenhadas", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Eu entendo a importância das minhas atividades para os objetivos da organização?"},
+  {"id": 23, "bloco": "Funções Desempenhadas", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Me sinto sobrecarregado com as minhas atividades."},
+  {"id": 24, "bloco": "Funções Desempenhadas", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Nos últimos 3 meses, senti que não tive tempo suficiente para realizar minhas funções."},
+  {"id": 25, "bloco": "Funções Desempenhadas", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Sinto falta de autonomia para executar minhas tarefas."},
+  {"id": 26, "bloco": "Funções Desempenhadas", "tipo": "escala", "escala_tipo": "frequencia", "texto": "As atividades que realizo no meu dia a dia exigem aprendizado, superação e contribuem para o meu desenvolvimento profissional."},
+  {"id": 27, "bloco": "Funções Desempenhadas", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Costumo me sentir desmotivado ou entediado no trabalho?"},
+  
+  {"id": 28, "bloco": "Plano de Carreira", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Tenho interesse em ocupar outros cargos no Barracuda."},
+  {"id": 29, "bloco": "Plano de Carreira", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Consigo enxergar meu crescimento dentro do Barracuda."},
+  {"id": 30, "bloco": "Plano de Carreira", "tipo": "escala", "escala_tipo": "frequencia", "texto": "O plano de carreira está claro para mim."},
+  {"id": 31, "bloco": "Plano de Carreira", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Entendo quais são as habilidades necessárias para ser promovido(a)?"},
+  {"id": 32, "bloco": "Plano de Carreira", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Nos últimos 6 meses, com que frequência investi tempo no meu desenvolvimento profissional?"},
+  {"id": 33, "bloco": "Plano de Carreira", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Desejo dedicar tempo para um programa de desenvolvimento individual."},
+  
+  {"id": 34, "bloco": "Infraestrutura e Ferramentas", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Meu ambiente de trabalho é seguro para realizar minhas atividades."},
+  {"id": 35, "bloco": "Infraestrutura e Ferramentas", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Sinto que meu ambiente de trabalho é confortável para realizar minhas atividades?"},
+  {"id": 36, "bloco": "Infraestrutura e Ferramentas", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Tenho acesso a todas as ferramentas físicas e digitais necessárias para desempenhar minhas funções."},
+  {"id": 37, "bloco": "Infraestrutura e Ferramentas", "tipo": "escala", "escala_tipo": "frequencia", "texto": "O ambiente de trabalho me permite manter a concentração necessária para desempenhar minhas funções."},
+  
+  {"id": 38, "bloco": "Salários e Benefícios", "tipo": "escala", "escala_tipo": "concordancia", "texto": "Acredito que meu salário é justo para as atividades que desempenho."},
+  {"id": 39, "bloco": "Salários e Benefícios", "tipo": "escala", "escala_tipo": "concordancia", "texto": "Eu sei como é calculado o Prêmio/Gorjeta, a bonificação oferecida aos colaboradores celetistas do Barracuda."},
+  {"id": 40, "bloco": "Salários e Benefícios", "tipo": "aberta", "escala_tipo": "-", "texto": "Além dos benefícios já oferecidos pelo Barracuda, sente falta de algum? Se sim, qual(is)"},
+  
+  {"id": 41, "bloco": "Considerações Finais", "tipo": "escala", "escala_tipo": "frequencia", "texto": "Qual a possibilidade de eu indicar o Barracuda para um amigo?"},
+  {"id": 42, "bloco": "Considerações Finais", "tipo": "aberta", "escala_tipo": "-", "texto": "Gostaria de deixar alguma ideia ou sugestão para a Diretoria? Se sim, descreva abaixo."},
+  {"id": 43, "bloco": "Considerações Finais", "tipo": "aberta", "escala_tipo": "-", "texto": "Existe algum ponto de atenção ou crítica que gostaria de comentar?"},
+  {"id": 44, "bloco": "Considerações Finais", "tipo": "escala", "escala_tipo": "frequencia", "texto": "O quanto eu me sinto feliz no trabalho?"},
+  {"id": 45, "bloco": "Considerações Finais", "tipo": "aberta", "escala_tipo": "-", "texto": "Trabalhar no Barracuda é motivo de orgulho para você? Comente sua resposta."}
+]
