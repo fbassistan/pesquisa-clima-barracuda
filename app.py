@@ -5,6 +5,7 @@ from datetime import datetime
 import urllib.request
 import json
 import time
+import hashlib
 
 st.set_page_config(page_title="Pesquisa de Clima Barracuda", page_icon="🏨", layout="centered")
 
@@ -53,7 +54,7 @@ def buscar_perguntas_nuvem():
         except Exception:
             return []
 
-# NOVO: Busca o resumo de adesão de forma agregada e anônima
+# Busca o resumo de adesão de forma agregada e anônima
 @st.cache_data(ttl=10)
 def buscar_adesao_nuvem():
     try:
@@ -82,10 +83,25 @@ for p in PERGUNTAS_RAW:
 
 LISTA_BLOCOS = list(PERGUNTAS_POR_BLOCO.keys())
 
-# Inicialização do Session State
+# ==============================================================================
+# INICIALIZAÇÃO DO SESSION STATE E CALLBACKS DE NAVEGAÇÃO
+# ==============================================================================
 if 'bloco_index' not in st.session_state: st.session_state.bloco_index = -1
 if 'respostas' not in st.session_state: st.session_state.respostas = {}
 if 'setor_selecionado' not in st.session_state: st.session_state.setor_selecionado = None
+if 'enviado' not in st.session_state: st.session_state.enviado = False
+
+def callback_iniciar_pesquisa():
+    st.session_state.bloco_index = 0
+
+def callback_voltar_tema():
+    if st.session_state.bloco_index == 0:
+        st.session_state.bloco_index = -1
+    else:
+        st.session_state.bloco_index -= 1
+
+def callback_avancar_tema():
+    st.session_state.bloco_index += 1
 
 st.title("🔒 Pesquisa de Clima Organizacional")
 
@@ -95,7 +111,12 @@ aba_pesquisa, aba_admin = st.tabs(["📝 Responder Pesquisa", "⚙️ Painel de 
 # ABA 1: COMPORTAMENTO DO QUESTIONÁRIO (COLABORADOR)
 # ==============================================================================
 with aba_pesquisa:
-    if cookie_manager:
+    if st.session_state.enviado:
+        st.balloons()
+        st.success("### 🎉 Respostas enviadas com sucesso!")
+        st.info("Obrigado! Sua participação foi registrada de forma 100% anônima e segura. Você já pode fechar esta aba.")
+    
+    elif cookie_manager:
         cookie_status = cookie_manager.get(RODADA_ATUAL)
         
         if cookie_status == "respondido":
@@ -138,15 +159,11 @@ with aba_pesquisa:
                 
                 if setor_atual:
                     st.session_state.setor_selecionado = setor_atual
-                    cookie_manager.set(f"{RODADA_ATUAL}_setor", setor_atual, key=f"set_setor_{RODADA_ATUAL}")
 
                 st.write("")
                 btn_desabilitado = True if not st.session_state.setor_selecionado else False
                 
-                if st.button("📝 Iniciar Pesquisa", type="primary", use_container_width=True, disabled=btn_desabilitado):
-                    st.session_state.bloco_index = 0
-                    cookie_manager.set(f"{RODADA_ATUAL}_bloco", "0", key=f"set_bloco_init_{RODADA_ATUAL}")
-                    st.rerun()
+                st.button("📝 Iniciar Pesquisa", type="primary", use_container_width=True, disabled=btn_desabilitado, on_click=callback_iniciar_pesquisa)
                     
                 if btn_desabilitado:
                     st.caption("⚠️ Selecione o seu setor acima para liberar o botão de início.")
@@ -194,29 +211,17 @@ with aba_pesquisa:
                     st.write("")
                 
                 # --------------------------------------------------------------
-                # NAVEGAÇÃO INFERIOR E COOKIES DE PROGRESSO
+                # NAVEGAÇÃO INFERIOR
                 # --------------------------------------------------------------
                 st.markdown("---")
                 col_ant, _, col_prox = st.columns([1, 1, 1])
                 
-                # Salva o progresso das respostas nos cookies de forma isolada
-                cookie_manager.set(f"{RODADA_ATUAL}_respostas", json.dumps(st.session_state.respostas), key=f"set_respostas_progress_{RODADA_ATUAL}")
-                
                 with col_ant:
-                    if st.button("⬅️ Voltar Tema"):
-                        if st.session_state.bloco_index == 0:
-                            st.session_state.bloco_index = -1
-                        else:
-                            st.session_state.bloco_index -= 1
-                        cookie_manager.set(f"{RODADA_ATUAL}_bloco", str(st.session_state.bloco_index), key=f"set_bloco_voltar_{RODADA_ATUAL}_{st.session_state.bloco_index}")
-                        st.rerun()
+                    st.button("⬅️ Voltar Tema", on_click=callback_voltar_tema)
                         
                 with col_prox:
                     if st.session_state.bloco_index < len(LISTA_BLOCOS) - 1:
-                        if st.button("Avançar Tema ➡️", type="primary", disabled=not bloco_completo):
-                            st.session_state.bloco_index += 1
-                            cookie_manager.set(f"{RODADA_ATUAL}_bloco", str(st.session_state.bloco_index), key=f"set_bloco_avancar_{RODADA_ATUAL}_{st.session_state.bloco_index}")
-                            st.rerun()
+                        st.button("Avançar Tema ➡️", type="primary", disabled=not bloco_completo, on_click=callback_avancar_tema)
                         if not bloco_completo:
                             st.caption("⚠️ Responda a todas as questões de múltipla escolha para avançar.")
                     else:
@@ -245,31 +250,58 @@ with aba_pesquisa:
                                     )
                                     with urllib.request.urlopen(req) as res:
                                         if "Success" in res.read().decode('utf-8'):
-                                            # Trava o reenvio usando chaves exclusivas
+                                            # 1. Trava o reenvio usando chaves exclusivas no navegador
                                             cookie_manager.set(RODADA_ATUAL, "respondido", max_age=7776000, key=f"set_respondido_final_{RODADA_ATUAL}")
                                             
-                                            # Deleta os backups de progresso de forma SEGURA (Silenciosa)
+                                            # 2. Deleta os cookies temporários de progresso de forma silenciosa
                                             for temp_cookie in [f"{RODADA_ATUAL}_respostas", f"{RODADA_ATUAL}_bloco", f"{RODADA_ATUAL}_setor"]:
                                                 try:
                                                     cookie_manager.delete(temp_cookie, key=f"del_{temp_cookie}")
                                                 except Exception:
                                                     pass
                                             
-                                            st.balloons()
-                                            st.success("Respostas salvas com total anonimato!")
-                                            
+                                            # 3. Limpa a memória interna e altera o estado para Sucesso
                                             st.session_state.respostas = {}
                                             st.session_state.bloco_index = -1
                                             st.session_state.setor_selecionado = None
-                                            time.sleep(2)
-                                            st.rerun()
+                                            st.session_state.enviado = True
+                                            
                                 except Exception as e:
                                     st.error(f"Erro ao salvar dados na nuvem: {e}")
                         if not bloco_completo:
                             st.caption("⚠️ Responda a todas as questões de múltipla escolha para liberar o envio.")
 
 # ==============================================================================
-# ABA 2: CONTROLE DO ADMINISTRADOR (RESET + NOVO GRÁFICO DE ADESÃO)
+# SINCRONIZAÇÃO EM TEMPO REAL DE COOKIES DE PROGRESSO (AO FINAL DA RENDERIZAÇÃO)
+# ==============================================================================
+if cookie_manager and not st.session_state.enviado and cookie_status != "respondido":
+    if st.session_state.bloco_index >= 0:
+        # Salva o Bloco Atual no Cookie
+        cookie_manager.set(
+            f"{RODADA_ATUAL}_bloco", 
+            str(st.session_state.bloco_index), 
+            key=f"sync_bloco_{st.session_state.bloco_index}"
+        )
+        
+        # Salva o Setor no Cookie
+        if st.session_state.setor_selecionado:
+            cookie_manager.set(
+                f"{RODADA_ATUAL}_setor", 
+                st.session_state.setor_selecionado, 
+                key=f"sync_setor_{st.session_state.setor_selecionado}"
+            )
+            
+        # Salva as Respostas Atuais no Cookie (Gerando Hash única para atualizar dinamicamente)
+        respostas_str = json.dumps(st.session_state.respostas, sort_keys=True)
+        respostas_hash = hashlib.md5(respostas_str.encode()).hexdigest()[:8]
+        cookie_manager.set(
+            f"{RODADA_ATUAL}_respostas", 
+            respostas_str, 
+            key=f"sync_respostas_{respostas_hash}"
+        )
+
+# ==============================================================================
+# ABA 2: CONTROLE DO ADMINISTRADOR (RESET + GRÁFICO DE ADESÃO)
 # ==============================================================================
 with aba_admin:
     st.markdown("### ⚙️ Painel Administrativo")
@@ -279,13 +311,12 @@ with aba_admin:
         st.write(f"**Identificador da Pesquisa Atual:** `{RODADA_ATUAL}`")
         st.markdown("---")
         
-        # 📊 NOVO PAINEL DE ADESÃO EM TEMPO REAL
         st.subheader("📊 Adesão de Colaboradores por Setor")
         
         col_res, col_btn = st.columns([3, 1])
         with col_btn:
             if st.button("🔄 Atualizar Dados", use_container_width=True):
-                st.cache_data.clear() # Limpa o cache para buscar dados frescos do Sheets
+                st.cache_data.clear()
                 st.rerun()
 
         dados_adesao = buscar_adesao_nuvem()
@@ -293,18 +324,13 @@ with aba_admin:
         
         st.metric("Total de Questionários Respondidos", f"{total_participantes} colaboradores")
         
-        # Garante que todos os setores definidos no app apareçam no gráfico, mesmo com zero votos
         adesao_completa = {setor: dados_adesao.get(setor, 0) for setor in SETORES}
-        
-        # Converte para DataFrame para renderizar o gráfico
         df_adesao = pd.DataFrame(list(adesao_completa.items()), columns=["Setor", "Respondidos"])
         df_adesao = df_adesao.set_index("Setor")
         
-        # Desenha o gráfico de barras interativo nativo do Streamlit
         st.bar_chart(df_adesao)
         st.markdown("---")
         
-        # ÁREA DE RESET DE PESQUISA (CUIDADO!)
         st.subheader("⚠️ Zona de Perigo")
         st.caption("Ao iniciar um novo ciclo, os navegadores de todos os colaboradores serão desbloqueados automaticamente para responderem à nova rodada.")
         if st.button("🔄 Iniciar Novo Ciclo de Pesquisa", type="primary", use_container_width=True):
