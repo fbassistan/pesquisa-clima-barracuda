@@ -53,6 +53,16 @@ def buscar_perguntas_nuvem():
         except Exception:
             return []
 
+# NOVO: Busca o resumo de adesão de forma agregada e anônima
+@st.cache_data(ttl=10)
+def buscar_adesao_nuvem():
+    try:
+        req = urllib.request.Request(f"{URL_WEB_APP}?acao=buscar_adesao", method="GET")
+        with urllib.request.urlopen(req, timeout=10) as res:
+            return json.loads(res.read().decode('utf-8'))
+    except Exception:
+        return {}
+
 RODADA_ATUAL = buscar_rodada_ativa()
 PERGUNTAS_RAW = buscar_perguntas_nuvem()
 
@@ -243,7 +253,7 @@ with aba_pesquisa:
                                                 try:
                                                     cookie_manager.delete(temp_cookie, key=f"del_{temp_cookie}")
                                                 except Exception:
-                                                    pass # Se o cookie temporário não existir, ignora o erro e segue em frente
+                                                    pass
                                             
                                             st.balloons()
                                             st.success("Respostas salvas com total anonimato!")
@@ -259,7 +269,7 @@ with aba_pesquisa:
                             st.caption("⚠️ Responda a todas as questões de múltipla escolha para liberar o envio.")
 
 # ==============================================================================
-# ABA 2: CONTROLE DO ADMINISTRADOR (RESET)
+# ABA 2: CONTROLE DO ADMINISTRADOR (RESET + NOVO GRÁFICO DE ADESÃO)
 # ==============================================================================
 with aba_admin:
     st.markdown("### ⚙️ Painel Administrativo")
@@ -267,7 +277,37 @@ with aba_admin:
     
     if senha == SENHA_ADMIN:
         st.write(f"**Identificador da Pesquisa Atual:** `{RODADA_ATUAL}`")
-        if st.button("🔄 Resetar Pesquisa (Iniciar Nova Rodada)", type="primary", use_container_width=True):
+        st.markdown("---")
+        
+        # 📊 NOVO PAINEL DE ADESÃO EM TEMPO REAL
+        st.subheader("📊 Adesão de Colaboradores por Setor")
+        
+        col_res, col_btn = st.columns([3, 1])
+        with col_btn:
+            if st.button("🔄 Atualizar Dados", use_container_width=True):
+                st.cache_data.clear() # Limpa o cache para buscar dados frescos do Sheets
+                st.rerun()
+
+        dados_adesao = buscar_adesao_nuvem()
+        total_participantes = sum(dados_adesao.values())
+        
+        st.metric("Total de Questionários Respondidos", f"{total_participantes} colaboradores")
+        
+        # Garante que todos os setores definidos no app apareçam no gráfico, mesmo com zero votos
+        adesao_completa = {setor: dados_adesao.get(setor, 0) for setor in SETORES}
+        
+        # Converte para DataFrame para renderizar o gráfico
+        df_adesao = pd.DataFrame(list(adesao_completa.items()), columns=["Setor", "Respondidos"])
+        df_adesao = df_adesao.set_index("Setor")
+        
+        # Desenha o gráfico de barras interativo nativo do Streamlit
+        st.bar_chart(df_adesao)
+        st.markdown("---")
+        
+        # ÁREA DE RESET DE PESQUISA (CUIDADO!)
+        st.subheader("⚠️ Zona de Perigo")
+        st.caption("Ao iniciar um novo ciclo, os navegadores de todos os colaboradores serão desbloqueados automaticamente para responderem à nova rodada.")
+        if st.button("🔄 Iniciar Novo Ciclo de Pesquisa", type="primary", use_container_width=True):
             try:
                 payload_reset = {"acao": "virar_rodada_pesquisa"}
                 req = urllib.request.Request(
@@ -277,7 +317,7 @@ with aba_admin:
                 )
                 with urllib.request.urlopen(req) as res:
                     if "Success" in res.read().decode('utf-8'):
-                        st.success("O identificador mudou na nuvem! Todos os navegadores foram liberados.")
+                        st.success("O identificador mudou na nuvem! Nova pesquisa iniciada com sucesso.")
                         st.cache_data.clear()
                         time.sleep(2)
                         st.rerun()
