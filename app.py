@@ -47,7 +47,6 @@ def buscar_perguntas_nuvem():
         with urllib.request.urlopen(req, timeout=10) as res:
             return json.loads(res.read().decode('utf-8'))
     except Exception as e:
-        # Tenta carregar do arquivo perguntas.json caso a conexão com a nuvem falhe
         try:
             with open("perguntas.json", "r", encoding="utf-8") as f:
                 return json.load(f)
@@ -96,7 +95,7 @@ with aba_pesquisa:
             st.info("Carregando as perguntas... Verifique se o arquivo perguntas.json foi enviado ao GitHub.")
         else:
             # ------------------------------------------------------------------
-            # RECUPERAÇÃO AUTOMÁTICA DE PROGRESSO (PROTEÇÃO DE CHAVES EXPLICITAS)
+            # RECUPERAÇÃO AUTOMÁTICA DE PROGRESSO
             # ------------------------------------------------------------------
             saved_respostas = cookie_manager.get(f"{RODADA_ATUAL}_respostas")
             saved_bloco = cookie_manager.get(f"{RODADA_ATUAL}_bloco")
@@ -162,12 +161,12 @@ with aba_pesquisa:
                     
                     if q["tipo"] == "escala":
                         valor_previo = st.session_state.respostas.get(q_key, None)
-                        opcoes = list(q["escala"].keys())
-                        idx_default = opcoes.index(valor_previo) if valor_previo in opcoes else None
+                        options = list(q["escala"].keys())
+                        idx_default = options.index(valor_previo) if valor_previo in options else None
                         
                         resposta = st.radio(
                             label=q['texto'], label_visibility="collapsed",
-                            options=opcoes, index=idx_default, key=f"ui_{q_key}"
+                            options=options, index=idx_default, key=f"ui_{q_key}"
                         )
                         if resposta:
                             st.session_state.respostas[q_key] = q["escala"][resposta]
@@ -185,7 +184,7 @@ with aba_pesquisa:
                     st.write("")
                 
                 # --------------------------------------------------------------
-                # NAVEGAÇÃO INFERIOR E COOKIES DE PROGRESSO COM CHAVES PROTEGIDAS
+                # NAVEGAÇÃO INFERIOR E COOKIES DE PROGRESSO
                 # --------------------------------------------------------------
                 st.markdown("---")
                 col_ant, _, col_prox = st.columns([1, 1, 1])
@@ -239,10 +238,12 @@ with aba_pesquisa:
                                             # Trava o reenvio usando chaves exclusivas
                                             cookie_manager.set(RODADA_ATUAL, "respondido", max_age=7776000, key=f"set_respondido_final_{RODADA_ATUAL}")
                                             
-                                            # Deleta os backups de progresso
-                                            cookie_manager.delete(f"{RODADA_ATUAL}_respostas", key=f"del_resp_final_{RODADA_ATUAL}")
-                                            cookie_manager.delete(f"{RODADA_ATUAL}_bloco", key=f"del_bloco_final_{RODADA_ATUAL}")
-                                            cookie_manager.delete(f"{RODADA_ATUAL}_setor", key=f"del_setor_final_{RODADA_ATUAL}")
+                                            # Deleta os backups de progresso de forma SEGURA (Silenciosa)
+                                            for temp_cookie in [f"{RODADA_ATUAL}_respostas", f"{RODADA_ATUAL}_bloco", f"{RODADA_ATUAL}_setor"]:
+                                                try:
+                                                    cookie_manager.delete(temp_cookie, key=f"del_{temp_cookie}")
+                                                except Exception:
+                                                    pass # Se o cookie temporário não existir, ignora o erro e segue em frente
                                             
                                             st.balloons()
                                             st.success("Respostas salvas com total anonimato!")
