@@ -91,7 +91,7 @@ def salvar_progresso_cookie():
             "sessao": st.session_state.id_sessao,
             "respostas": st.session_state.respostas
         }
-        cookie_manager.set(f"{RODADA_ATUAL}_progress", json.dumps(prog), key=f"prog_{time.time()}")
+        cookie_manager.set(cookie=f"{RODADA_ATUAL}_progress", val=json.dumps(prog), key=f"prog_{time.time()}")
 
 # Envio de resposta em segundo plano
 def enviar_resposta_background(payload):
@@ -164,7 +164,7 @@ with aba_pesquisa:
     is_done_cookie = (all_cookies.get(RODADA_ATUAL) == "respondido")
     is_done_session = st.session_state.get("enviado", False)
 
-    # 2. TRAVA ABSOLUTA DE SEGURANÇA (Interrompe qualquer carregamento adicional)
+    # 2. TRAVA ABSOLUTA DE SEGURANÇA (Bloqueia o dispositivo se já respondeu)
     if is_done_cookie or is_done_session:
         st.balloons()
         st.warning("### ⚠️ Participação já registrada!")
@@ -311,17 +311,23 @@ with aba_pesquisa:
                                 )
                                 with urllib.request.urlopen(req, timeout=10) as res:
                                     if "Success" in res.read().decode('utf-8'):
-                                        # Grava APENAS o cookie de trava definitivo (Sem colisões)
-                                        cookie_manager.set(RODADA_ATUAL, "respondido", max_age=7776000, key=f"set_done_{RODADA_ATUAL}")
+                                        # 1. Grava o cookie definitivo de travamento no navegador
+                                        cookie_manager.set(cookie=RODADA_ATUAL, val="respondido", max_age=7776000, key=f"set_done_{RODADA_ATUAL}")
                                         
-                                        # Zera o Session State local
+                                        # 2. Apaga o cookie temporário de progresso
+                                        cookie_manager.set(cookie=f"{RODADA_ATUAL}_progress", val="", max_age=0, key=f"del_prog_{RODADA_ATUAL}")
+                                        
+                                        # 3. Marca o estado da sessão como enviado
+                                        st.session_state.enviado = True
                                         st.session_state.respostas = {}
                                         st.session_state.bloco_index = -1
                                         st.session_state.setor_selecionado = None
                                         st.session_state.id_sessao = None
-                                        st.session_state.enviado = True
-                                        st.session_state.restaurado = True
-                                        st.rerun()
+                                        
+                                        # 4. Mensagem de Sucesso (Renderizada diretamente sem forçar st.rerun)
+                                        st.balloons()
+                                        st.success("### 🎉 Respostas enviadas com sucesso!")
+                                        st.info("Obrigado! Sua participação foi registrada de forma 100% anônima e este dispositivo foi bloqueado para novos envios neste ciclo.")
                             except Exception as e:
                                 st.error(f"Erro ao concluir pesquisa: {e}")
                     if not bloco_completo:
