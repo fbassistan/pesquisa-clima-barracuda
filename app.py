@@ -38,7 +38,7 @@ def buscar_perguntas_nuvem():
         req = urllib.request.Request(f"{URL_WEB_APP}?acao=buscar_perguntas", method="GET")
         with urllib.request.urlopen(req, timeout=10) as res:
             return json.loads(res.read().decode('utf-8'))
-    except Exception as e:
+    except Exception:
         try:
             with open("perguntas.json", "r", encoding="utf-8") as f:
                 return json.load(f)
@@ -57,7 +57,7 @@ def buscar_adesao_nuvem():
 RODADA_ATUAL = buscar_rodada_ativa()
 PERGUNTAS_RAW = buscar_perguntas_nuvem()
 
-# Agrupa as perguntas dinâmicas em blocos temáticos lendo diretamente do JSON
+# Agrupa as perguntas dinâmicas em blocos temáticos lendo do JSON/Sheets
 PERGUNTAS_POR_BLOCO = {}
 for p in PERGUNTAS_RAW:
     bloco = p.get("bloco", "Geral").strip()
@@ -74,15 +74,16 @@ for p in PERGUNTAS_RAW:
 LISTA_BLOCOS = list(PERGUNTAS_POR_BLOCO.keys())
 
 # ==============================================================================
-# INICIALIZAÇÃO DO SESSION STATE E FUNÇÕES DE AUTO-SALVAMENTO
+# INICIALIZAÇÃO DO SESSION STATE E AUTO-SALVAMENTO
 # ==============================================================================
 if 'bloco_index' not in st.session_state: st.session_state.bloco_index = -1
 if 'respostas' not in st.session_state: st.session_state.respostas = {}
 if 'setor_selecionado' not in st.session_state: st.session_state.setor_selecionado = None
 if 'id_sessao' not in st.session_state: st.session_state.id_sessao = None
 if 'enviado' not in st.session_state: st.session_state.enviado = False
+if 'restaurado' not in st.session_state: st.session_state.restaurado = False
 
-# Envio em Segundo Plano
+# Envio de resposta em segundo plano (Não trava a navegação do usuário)
 def enviar_resposta_background(payload):
     try:
         req = urllib.request.Request(
@@ -124,17 +125,21 @@ def auto_salvar_resposta(q_id, bloco, texto, tipo):
     }
     threading.Thread(target=enviar_resposta_background, args=(payload,), daemon=True).start()
 
+# Callbacks com sincronização imediata de Cookie
 def callback_iniciar_pesquisa():
     st.session_state.bloco_index = 0
+    cookie_manager.set(f"{RODADA_ATUAL}_bloco", "0", key=f"btn_init_{time.time()}")
 
 def callback_voltar_tema():
     if st.session_state.bloco_index == 0:
         st.session_state.bloco_index = -1
     else:
         st.session_state.bloco_index -= 1
+    cookie_manager.set(f"{RODADA_ATUAL}_bloco", str(st.session_state.bloco_index), key=f"btn_back_{time.time()}")
 
 def callback_avancar_tema():
     st.session_state.bloco_index += 1
+    cookie_manager.set(f"{RODADA_ATUAL}_bloco", str(st.session_state.bloco_index), key=f"btn_next_{time.time()}")
 
 st.title("🔒 Pesquisa de Clima Organizacional")
 
@@ -158,28 +163,64 @@ with aba_pesquisa:
         elif not LISTA_BLOCOS:
             st.info("Carregando as perguntas... Verifique se o arquivo perguntas.json foi enviado ao GitHub.")
         else:
-            saved_respostas = cookie_manager.get(f"{RODADA_ATUAL}_respostas")
-            saved_bloco = cookie_manager.get(f"{RODADA_ATUAL}_bloco")
-            saved_setor = cookie_manager.get(f"{RODADA_ATUAL}_setor")
-            saved_sessao = cookie_manager.get(f"{RODADA_ATUAL}_sessao_id")
-            
-            if saved_sessao:
-                st.session_state.id_sessao = saved_sessao
-            elif not st.session_state.id_sessao:
-                st.session_state.id_sessao = f"S_{str(uuid.uuid4())[:8]}"
-                cookie_manager.set(f"{RODADA_ATUAL}_sessao_id", st.session_state.id_sessao, key=f"set_sessao_id_{RODADA_ATUAL}")
+            # ------------------------------------------------------------------
+            # RESTAURAÇÃO DE ESTADO INTELIGENTE (RESOLVE TRAVAMENTO E RECONEXÃO)
+            # ------------------------------------------------------------------
+            if not st.session_state.restaurado and LISTA_BLOCOS:
+                saved_respostas = cookie_manager.get(f"{RODADA_ATUAL}_respostas")
+                saved_bloco = cookie_manager.get(f"{RODADA_ATUAL}_bloco")
+                saved_setor = cookie_manager.get(f"{RODADA_ATUAL}_setor")
+                saved_sessao = cookie_manager.get(f"{RODADA_ATUAL}_sessao_id")
+                
+                if saved_sessao:
+                    st.session_state.id_sessao = saved_sessao
+                elif not st.session_state.id_sessao:
+                    st.session_state.id_sessao = f"S_{str(uuid.uuid4())[:8]}"
+                    cookie_manager.set(f"{RODADA_ATUAL}_sessao_id", st.session_state.id_sessao, key=f"set_sessao_id_{RODADA_ATUAL}")
 
-            if saved_respostas and not st.session_state.respostas:
-                try:
-                    st.session_state.respostas = json.loads(saved_respostas)
-                except Exception: pass
-            if saved_bloco is not None and st.session_state.bloco_index == -1:
-                st.session_state.bloco_index = int(saved_bloco)
-            if saved_setor and st.session_state.setor_selecionado is None:
-                st.session_state.setor_selecionado = saved_setor
+                if saved_setor and st.session_state.setor_selecionado is None:
+                    st.session_state.setor_selecionado = saved_setor
+
+                if saved_respostas and not st.session_state.respostas:
+                    try:
+                        st.session_state.respostas = json.loads(saved_respostas)
+                    except Exception: pass
+
+                # Calcula dinamicamente até qual bloco o usuário já respondeu de verdade
+                if st.session_state.bloco_index == -1:
+                    idx_cookie = -1
+                    if saved_bloco is not None:
+                        try: idx_cookie = int(saved_bloco)
+                        except ValueError: idx_cookie = -1
+
+                    maior_bloco_liberado = 0 if (st.session_state.setor_selecionado or idx_cookie >= 0) else -1
+                    
+                    if st.session_state.respostas and LISTA_BLOCOS:
+                        for idx, b_nome in enumerate(LISTA_BLOCOS):
+                            perg_bloco = PERGUNTAS_POR_BLOCO.get(b_nome, [])
+                            bloco_ok = True
+                            for q in perg_bloco:
+                                if q.get("tipo") == "radio":
+                                    if f"q_{q['id']}" not in st.session_state.respostas:
+                                        bloco_ok = False
+                                        break
+                            if bloco_ok:
+                                if idx + 1 < len(LISTA_BLOCOS):
+                                    maior_bloco_liberado = max(maior_bloco_liberado, idx + 1)
+                            else:
+                                maior_bloco_liberado = max(maior_bloco_liberado, idx)
+                                break
+
+                    bloco_final = max(idx_cookie, maior_bloco_liberado)
+                    if bloco_final >= len(LISTA_BLOCOS):
+                        bloco_final = len(LISTA_BLOCOS) - 1
+                    
+                    st.session_state.bloco_index = bloco_final
+
+                st.session_state.restaurado = True
 
             # ------------------------------------------------------------------
-            # TELA DE BOAS-VINDAS OFICIAL DO BARRACUDA
+            # TELA DE BOAS-VINDAS OFICIAL DO BARRACUDA (BLOCO -1)
             # ------------------------------------------------------------------
             if st.session_state.bloco_index == -1:
                 st.markdown("### Seja bem-vindo(a) à nossa Pesquisa de Clima Organizacional – Ciclo 2026")
@@ -217,7 +258,7 @@ with aba_pesquisa:
                     st.caption("⚠️ Selecione o seu setor acima para liberar o botão de início.")
 
             # ------------------------------------------------------------------
-            # RENDERIZAÇÃO DOS BLOCOS DE PERGUNTAS
+            # RENDERIZAÇÃO DOS BLOCOS DE PERGUNTAS (BLOCO >= 0)
             # ------------------------------------------------------------------
             else:
                 bloco_nome = LISTA_BLOCOS[st.session_state.bloco_index]
@@ -226,7 +267,6 @@ with aba_pesquisa:
                 st.progress((st.session_state.bloco_index) / len(LISTA_BLOCOS))
                 st.caption(f"Setor selecionado: **{st.session_state.setor_selecionado}**")
                 
-                # Regra específica para o aviso de Liderança Direta (Bloco 2)
                 if "Postura da Liderança Direta" in bloco_nome:
                     st.info("ℹ️ **Importante:** As próximas perguntas são sobre seu(sua) **líder direto(a)**: a pessoa a quem você se reporta no dia a dia. Se você não ocupa cargo de liderança, refere-se ao seu supervisor(a) ou coordenador(a). Se você é supervisor(a) ou coordenador(a), refere-se ao seu gestor(a).")
                 
@@ -297,10 +337,8 @@ with aba_pesquisa:
                                             cookie_manager.set(RODADA_ATUAL, "respondido", max_age=7776000, key=f"set_respondido_final_{RODADA_ATUAL}")
                                             
                                             for temp_cookie in [f"{RODADA_ATUAL}_respostas", f"{RODADA_ATUAL}_bloco", f"{RODADA_ATUAL}_setor", f"{RODADA_ATUAL}_sessao_id"]:
-                                                try:
-                                                    cookie_manager.delete(temp_cookie, key=f"del_{temp_cookie}")
-                                                except Exception:
-                                                    pass
+                                                try: cookie_manager.delete(temp_cookie, key=f"del_{temp_cookie}")
+                                                except Exception: pass
                                             
                                             st.session_state.respostas = {}
                                             st.session_state.bloco_index = -1
@@ -314,17 +352,17 @@ with aba_pesquisa:
                             st.caption("⚠️ Responda a todas as questões de múltipla escolha para liberar o envio.")
 
 # ==============================================================================
-# SINCRONIZAÇÃO EM TEMPO REAL DOS COOKIES LOCAIS (SEGUNDO PLANO)
+# SINCRONIZAÇÃO DE SEGURANÇA EM SEGUNDO PLANO
 # ==============================================================================
 if cookie_manager and not st.session_state.enviado and cookie_status != "respondido":
     if st.session_state.bloco_index >= 0:
-        cookie_manager.set(f"{RODADA_ATUAL}_bloco", str(st.session_state.bloco_index), key=f"sync_bloco_{st.session_state.bloco_index}")
+        cookie_manager.set(f"{RODADA_ATUAL}_bloco", str(st.session_state.bloco_index), key="sync_bloco_curr")
         if st.session_state.setor_selecionado:
-            cookie_manager.set(f"{RODADA_ATUAL}_setor", st.session_state.setor_selecionado, key=f"sync_setor_{st.session_state.setor_selecionado}")
+            cookie_manager.set(f"{RODADA_ATUAL}_setor", st.session_state.setor_selecionado, key="sync_setor_curr")
             
         respostas_str = json.dumps(st.session_state.respostas, sort_keys=True)
         respostas_hash = hashlib.md5(respostas_str.encode()).hexdigest()[:8]
-        cookie_manager.set(f"{RODADA_ATUAL}_respostas", respostas_str, key=f"sync_respostas_{respostas_hash}")
+        cookie_manager.set(f"{RODADA_ATUAL}_respostas", respostas_str, key=f"sync_resp_{respostas_hash}")
 
 # ==============================================================================
 # ABA 2: CONTROLE DO ADMINISTRADOR
