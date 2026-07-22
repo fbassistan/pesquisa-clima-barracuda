@@ -14,7 +14,6 @@ st.set_page_config(page_title="Pesquisa de Clima Barracuda", page_icon="🏨", l
 URL_WEB_APP = "https://script.google.com/macros/s/AKfycbvxIXvcisyDL5ljMD8gSwYwKhF_bFdvKtG2M-_D1G7Rv26-TfFd-vYR-zxJ0PNIU-XtA/exec"
 SENHA_ADMIN = "RH2026"
 
-# Instância fixa do CookieManager (Evita re-renderizações e pulos de tela)
 cookie_manager = stx.CookieManager(key="barracuda_cookies_manager")
 
 # ==============================================================================
@@ -71,7 +70,7 @@ for p in PERGUNTAS_RAW:
 LISTA_BLOCOS = list(PERGUNTAS_POR_BLOCO.keys())
 
 # ==============================================================================
-# INICIALIZAÇÃO DO SESSION STATE E SALVAMENTO ESTÁVEL
+# INICIALIZAÇÃO DO SESSION STATE
 # ==============================================================================
 if 'bloco_index' not in st.session_state: st.session_state.bloco_index = -1
 if 'respostas' not in st.session_state: st.session_state.respostas = {}
@@ -79,24 +78,18 @@ if 'id_sessao' not in st.session_state: st.session_state.id_sessao = None
 if 'enviado' not in st.session_state: st.session_state.enviado = False
 if 'restaurado' not in st.session_state: st.session_state.restaurado = False
 
+# Salva o progresso nos cookies APENAS na transição de temas (Sem pulos de tela)
 def salvar_progresso_cookie():
-    """Salva o progresso no navegador sem recriar o componente (Evita pular tela)"""
     if cookie_manager and not st.session_state.enviado:
-        prog = {
-            "bloco": st.session_state.bloco_index,
-            "sessao": st.session_state.id_sessao,
-            "respostas": st.session_state.respostas
-        }
         try:
-            cookie_manager.set(
-                cookie=f"{RODADA_ATUAL}_progress",
-                val=json.dumps(prog),
-                max_age=7776000,
-                key="save_progress_static_key"
-            )
+            now_ts = str(time.time())
+            cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val=str(st.session_state.bloco_index), max_age=7776000, key=f"ck_bl_{now_ts}")
+            cookie_manager.set(cookie=f"{RODADA_ATUAL}_sessao", val=str(st.session_state.id_sessao), max_age=7776000, key=f"ck_se_{now_ts}")
+            cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val=json.dumps(st.session_state.respostas), max_age=7776000, key=f"ck_re_{now_ts}")
         except Exception:
             pass
 
+# Envio em segundo plano para o Google Sheets (Totalmente silencioso)
 def enviar_resposta_background(payload):
     try:
         req = urllib.request.Request(
@@ -133,8 +126,6 @@ def auto_salvar_resposta(q_id, bloco, texto, tipo):
         }
         threading.Thread(target=enviar_resposta_background, args=(payload,), daemon=True).start()
 
-    salvar_progresso_cookie()
-
 # Callbacks de Navegação
 def callback_iniciar_pesquisa():
     st.session_state.bloco_index = 0
@@ -159,26 +150,35 @@ aba_pesquisa, aba_admin = st.tabs(["📝 Responder Pesquisa", "⚙️ Painel de 
 # ABA 1: FLUXO DO COLABORADOR
 # ==============================================================================
 with aba_pesquisa:
-    # 1. RECUPERAÇÃO DE COOKIES DO NAVEGADOR (COM ESPERA ATIVA DE CARREGAMENTO)
-    if not st.session_state.restaurado and cookie_manager:
-        is_done_cookie = cookie_manager.get(RODADA_ATUAL)
-        progress_raw = cookie_manager.get(f"{RODADA_ATUAL}_progress")
+    # 1. LEITURA E RESTAURAÇÃO DE COOKIES DO NAVEGADOR
+    all_cookies = cookie_manager.get_all() if cookie_manager else {}
+
+    if not st.session_state.restaurado and all_cookies:
+        is_done_cookie = (all_cookies.get(RODADA_ATUAL) == "respondido")
         
-        if is_done_cookie == "respondido":
+        if is_done_cookie:
             st.session_state.enviado = True
             st.session_state.restaurado = True
-        elif progress_raw:
-            try:
-                prog_data = json.loads(progress_raw)
-                if isinstance(prog_data.get("respostas"), dict):
-                    st.session_state.respostas = prog_data["respostas"]
-                if prog_data.get("sessao"):
-                    st.session_state.id_sessao = prog_data["sessao"]
-                if isinstance(prog_data.get("bloco"), int):
-                    st.session_state.bloco_index = prog_data["bloco"]
+        else:
+            saved_bloco = all_cookies.get(f"{RODADA_ATUAL}_bloco")
+            saved_sessao = all_cookies.get(f"{RODADA_ATUAL}_sessao")
+            saved_resp = all_cookies.get(f"{RODADA_ATUAL}_respostas")
+            
+            if saved_sessao:
+                st.session_state.id_sessao = saved_sessao
+            if saved_bloco is not None:
+                try:
+                    st.session_state.bloco_index = int(saved_bloco)
+                except ValueError:
+                    pass
+            if saved_resp:
+                try:
+                    st.session_state.respostas = json.loads(saved_resp)
+                except Exception:
+                    pass
+            
+            if saved_bloco is not None or saved_sessao is not None:
                 st.session_state.restaurado = True
-            except Exception:
-                pass
 
     if not st.session_state.id_sessao:
         st.session_state.id_sessao = f"S_{str(uuid.uuid4())[:8]}"
@@ -207,7 +207,7 @@ with aba_pesquisa:
             
             st.info("⏱️ **Leva poucos minutos.** As perguntas estão organizadas por tema e usam formatos rápidos: escalas de 1 a 5, sim ou não e alguns campos abertos para quem quiser se aprofundar.")
             st.warning("🤝 **Seja honesto(a).** Essa pesquisa só cumpre seu propósito se refletir a realidade, inclusive os pontos difíceis. Toda resposta é bem-vinda, elogio ou crítica.")
-            st.success("✅ Depois da aplicação, vamos compartilhar os resultados gerais e o plano de ação. Responder à pesquisa é o primeiro passo para transformar percepção em mudança real. **Contamos com a sua participação!**")
+            st.success("✅ Depois da aplicação, vamos compartilhar os resultados gerais e o plano de ação. Responder à pesquisa é o primeiro passo para transformar perception em mudança real. **Contamos com a sua participação!**")
             
             st.markdown("---")
             st.markdown("### Nossa Identidade")
@@ -295,8 +295,10 @@ with aba_pesquisa:
                                 )
                                 with urllib.request.urlopen(req, timeout=10) as res:
                                     if "Success" in res.read().decode('utf-8'):
-                                        cookie_manager.set(cookie=RODADA_ATUAL, val="respondido", max_age=7776000, key="set_done_final_key")
-                                        cookie_manager.set(cookie=f"{RODADA_ATUAL}_progress", val="", max_age=0, key="del_prog_final_key")
+                                        now_end = str(time.time())
+                                        cookie_manager.set(cookie=RODADA_ATUAL, val="respondido", max_age=7776000, key=f"set_done_{now_end}")
+                                        cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val="", max_age=0, key=f"del_bl_{now_end}")
+                                        cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val="", max_age=0, key=f"del_re_{now_end}")
                                         
                                         st.session_state.enviado = True
                                         st.session_state.respostas = {}
