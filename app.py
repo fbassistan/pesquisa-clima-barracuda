@@ -10,13 +10,10 @@ import threading
 st.set_page_config(page_title="Pesquisa de Clima Barracuda", page_icon="🏨", layout="centered")
 
 # ➔ SUA URL DO GOOGLE SCRIPTS (Terminada em /exec)
-URL_WEB_APP = "https://script.google.com/macros/s/AKfycbzvxIXvcisyDL5ljMD8gSwYwKhF_bFdvKtG2M-_D1G7Rv26-TfFd-vYR-zxJ0PNIU-XtA/exec"
+URL_WEB_APP = "https://script.google.com/macros/s/AKfycbvxIXvcisyDL5ljMD8gSwYwKhF_bFdvKtG2M-_D1G7Rv26-TfFd-vYR-zxJ0PNIU-XtA/exec"
 SENHA_ADMIN = "RH2026"
 
 cookie_manager = stx.CookieManager(key="barracuda_cookies_manager")
-
-# Lista fixa de Setores
-SETORES = ["RESTAURANTE / COZINHA", "BAR", "SALÃO", "RECEPÇÃO", "GOVERNANÇA", "MANUTENÇÃO", "ADMINISTRATIVO", "OUTROS"]
 
 # ==============================================================================
 # FUNÇÕES DE BUSCA DINÂMICA
@@ -76,23 +73,21 @@ LISTA_BLOCOS = list(PERGUNTAS_POR_BLOCO.keys())
 # ==============================================================================
 if 'bloco_index' not in st.session_state: st.session_state.bloco_index = -1
 if 'respostas' not in st.session_state: st.session_state.respostas = {}
-if 'setor_selecionado' not in st.session_state: st.session_state.setor_selecionado = None
 if 'id_sessao' not in st.session_state: st.session_state.id_sessao = None
 if 'enviado' not in st.session_state: st.session_state.enviado = False
 if 'restaurado' not in st.session_state: st.session_state.restaurado = False
 
-# Salva o progresso no navegador com chave ESTÁTICA (Sem pulo de tela)
+# Salva o progresso no navegador com chave ESTÁTICA
 def salvar_progresso_cookie():
     if cookie_manager and not st.session_state.enviado:
         prog = {
             "bloco": st.session_state.bloco_index,
-            "setor": st.session_state.setor_selecionado,
             "sessao": st.session_state.id_sessao,
             "respostas": st.session_state.respostas
         }
         cookie_manager.set(cookie=f"{RODADA_ATUAL}_progress", val=json.dumps(prog), key="static_prog_cookie_key")
 
-# Envio de resposta em segundo plano (Silencioso e sem re-render)
+# Envio de resposta em segundo plano (Silencioso)
 def enviar_resposta_background(payload):
     try:
         req = urllib.request.Request(
@@ -116,9 +111,8 @@ def auto_salvar_resposta(q_id, bloco, texto, tipo):
     st.session_state.respostas[f"q_{q_id}"] = resposta_final
     
     id_sessao = st.session_state.get("id_sessao")
-    setor = st.session_state.get("setor_selecionado")
     
-    if id_sessao and setor:
+    if id_sessao:
         payload = {
             "acao": "salvar_resposta_avulsa",
             "id_sessao": id_sessao,
@@ -128,7 +122,7 @@ def auto_salvar_resposta(q_id, bloco, texto, tipo):
             "id_pergunta": q_id,
             "enunciado": texto,
             "resposta": resposta_final,
-            "setor": setor
+            "setor": "Geral"
         }
         threading.Thread(target=enviar_resposta_background, args=(payload,), daemon=True).start()
 
@@ -179,8 +173,6 @@ with aba_pesquisa:
                     prog_data = json.loads(progress_raw)
                     if "respostas" in prog_data and isinstance(prog_data["respostas"], dict):
                         st.session_state.respostas = prog_data["respostas"]
-                    if "setor" in prog_data and prog_data["setor"]:
-                        st.session_state.setor_selecionado = prog_data["setor"]
                     if "sessao" in prog_data and prog_data["sessao"]:
                         st.session_state.id_sessao = prog_data["sessao"]
                     if "bloco" in prog_data and isinstance(prog_data["bloco"], int):
@@ -217,19 +209,8 @@ with aba_pesquisa:
             st.markdown("**💎 Nossos Valores:**\n- Excelência em hospitalidade\n- Autenticidade\n- Integridade\n- Responsabilidade socioambiental\n- Inovação")
             
             st.markdown("---")
-            st.markdown("#### Para começarmos, selecione o seu setor:")
-            idx_setor = SETORES.index(st.session_state.setor_selecionado) if st.session_state.setor_selecionado in SETORES else None
-            setor_atual = st.selectbox("Seu Setor/Departamento:", SETORES, index=idx_setor, placeholder="Escolha uma opção...", key="select_setor_main")
-            
-            if setor_atual:
-                st.session_state.setor_selecionado = setor_atual
-
             st.write("")
-            btn_desabilitado = True if not st.session_state.setor_selecionado else False
-            st.button("📝 Iniciar Pesquisa", type="primary", use_container_width=True, disabled=btn_desabilitado, on_click=callback_iniciar_pesquisa)
-                
-            if btn_desabilitado:
-                st.caption("⚠️ Selecione o seu setor acima para liberar o botão de início.")
+            st.button("📝 Iniciar Pesquisa", type="primary", use_container_width=True, on_click=callback_iniciar_pesquisa)
 
         # ------------------------------------------------------------------
         # RENDERIZAÇÃO DOS BLOCOS DE PERGUNTAS (BLOCO >= 0)
@@ -239,7 +220,6 @@ with aba_pesquisa:
             
             st.write(f"### {bloco_nome}")
             st.progress((st.session_state.bloco_index) / len(LISTA_BLOCOS))
-            st.caption(f"Setor selecionado: **{st.session_state.setor_selecionado}**")
             
             if "Postura da Liderança Direta" in bloco_nome:
                 st.info("ℹ️ **Importante:** As próximas perguntas são sobre seu(sua) **líder direto(a)**: a pessoa a quem você se reporta no dia a dia. Se você não ocupa cargo de liderança, refere-se ao seu supervisor(a) ou coordenador(a). Se você é supervisor(a) ou coordenador(a), refere-se ao seu gestor(a).")
@@ -318,7 +298,6 @@ with aba_pesquisa:
                                         st.session_state.enviado = True
                                         st.session_state.respostas = {}
                                         st.session_state.bloco_index = -1
-                                        st.session_state.setor_selecionado = None
                                         st.session_state.id_sessao = None
                                         
                                         st.balloons()
@@ -340,7 +319,7 @@ with aba_admin:
         st.write(f"**Identificador da Pesquisa Atual:** `{RODADA_ATUAL}`")
         st.markdown("---")
         
-        st.subheader("📊 Adesão de Colaboradores por Setor")
+        st.subheader("📊 Engajamento de Colaboradores")
         
         col_res, col_btn = st.columns([3, 1])
         with col_btn:
@@ -352,12 +331,6 @@ with aba_admin:
         total_participantes = sum(dados_adesao.values())
         
         st.metric("Total de Questionários Respondidos", f"{total_participantes} colaboradores")
-        
-        adesao_completa = {setor: dados_adesao.get(setor, 0) for setor in SETORES}
-        df_adesao = pd.DataFrame(list(adesao_completa.items()), columns=["Setor", "Respondidos"])
-        df_adesao = df_adesao.set_index("Setor")
-        
-        st.bar_chart(df_adesao)
         st.markdown("---")
         
         st.subheader("⚠️ Zona de Perigo")
