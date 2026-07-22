@@ -78,17 +78,18 @@ if 'id_sessao' not in st.session_state: st.session_state.id_sessao = None
 if 'enviado' not in st.session_state: st.session_state.enviado = False
 if 'restaurado' not in st.session_state: st.session_state.restaurado = False
 
-# Salva o progresso nos cookies com chaves ESTÁTICAS (Impede pulos de tela)
+# Salva o progresso nos cookies APENAS ao mudar de tema (MANTÉM A TELA 100% FIRME)
 def salvar_progresso_cookie():
     if cookie_manager and not st.session_state.enviado:
         try:
-            cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val=str(st.session_state.bloco_index), max_age=7776000, key="ck_save_bloco")
-            cookie_manager.set(cookie=f"{RODADA_ATUAL}_sessao", val=str(st.session_state.id_sessao), max_age=7776000, key="ck_save_sessao")
-            cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val=json.dumps(st.session_state.respostas), max_age=7776000, key="ck_save_respostas")
+            now_ts = str(time.time())
+            cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val=str(st.session_state.bloco_index), max_age=7776000, key=f"ck_bl_{now_ts}")
+            cookie_manager.set(cookie=f"{RODADA_ATUAL}_sessao", val=str(st.session_state.id_sessao), max_age=7776000, key=f"ck_se_{now_ts}")
+            cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val=json.dumps(st.session_state.respostas), max_age=7776000, key=f"ck_re_{now_ts}")
         except Exception:
             pass
 
-# Envio em segundo plano para o Google Sheets
+# Envio em segundo plano para o Google Sheets (Silencioso e sem re-render)
 def enviar_resposta_background(payload):
     try:
         req = urllib.request.Request(
@@ -125,9 +126,6 @@ def auto_salvar_resposta(q_id, bloco, texto, tipo):
             "setor": "Geral"
         }
         threading.Thread(target=enviar_resposta_background, args=(payload,), daemon=True).start()
-
-    # Grava o cookie imediatamente ao selecionar cada caixa
-    salvar_progresso_cookie()
 
 # Callbacks de Navegação
 def callback_iniciar_pesquisa():
@@ -248,11 +246,11 @@ with aba_pesquisa:
                     options = [str(opt).strip() for opt in q["opcoes"]]
                     saved_val = st.session_state.respostas.get(q_key)
                     
-                    # Força a restauração do valor salvo no session_state do widget
+                    # Sincroniza e pré-marca a resposta salva sem conflito de keys
                     if saved_val and str(saved_val).strip() in options:
-                        val_str = str(saved_val).strip()
-                        if ui_key not in st.session_state:
-                            st.session_state[ui_key] = val_str
+                        st.session_state[ui_key] = str(saved_val).strip()
+
+                    if ui_key in st.session_state and st.session_state[ui_key] in options:
                         idx_default = options.index(st.session_state[ui_key])
                     else:
                         idx_default = None
@@ -311,9 +309,10 @@ with aba_pesquisa:
                                 )
                                 with urllib.request.urlopen(req, timeout=10) as res:
                                     if "Success" in res.read().decode('utf-8'):
-                                        cookie_manager.set(cookie=RODADA_ATUAL, val="respondido", max_age=7776000, key="ck_end_done")
-                                        cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val="", max_age=0, key="ck_end_del_bl")
-                                        cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val="", max_age=0, key="ck_end_del_re")
+                                        now_end = str(time.time())
+                                        cookie_manager.set(cookie=RODADA_ATUAL, val="respondido", max_age=7776000, key=f"set_done_{now_end}")
+                                        cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val="", max_age=0, key=f"del_bl_{now_end}")
+                                        cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val="", max_age=0, key=f"del_re_{now_end}")
                                         
                                         st.session_state.enviado = True
                                         st.session_state.respostas = {}
