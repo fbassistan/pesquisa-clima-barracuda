@@ -78,7 +78,7 @@ if 'id_sessao' not in st.session_state: st.session_state.id_sessao = None
 if 'enviado' not in st.session_state: st.session_state.enviado = False
 if 'restaurado' not in st.session_state: st.session_state.restaurado = False
 
-# Salva o progresso nos cookies APENAS na transição de temas (Sem pulos de tela)
+# Salva o progresso nos cookies apenas na navegação entre temas
 def salvar_progresso_cookie():
     if cookie_manager and not st.session_state.enviado:
         try:
@@ -103,13 +103,14 @@ def enviar_resposta_background(payload):
         pass
 
 def auto_salvar_resposta(q_id, bloco, texto, tipo):
-    q_key = f"ui_q_{q_id}"
-    valor_raw = st.session_state.get(q_key)
+    ui_key = f"ui_q_{q_id}"
+    valor_raw = st.session_state.get(ui_key)
     
     if valor_raw is None or valor_raw == "":
         return
         
-    st.session_state.respostas[f"q_{q_id}"] = valor_raw
+    val_clean = str(valor_raw).strip()
+    st.session_state.respostas[f"q_{q_id}"] = val_clean
     id_sessao = st.session_state.get("id_sessao")
     
     if id_sessao:
@@ -121,7 +122,7 @@ def auto_salvar_resposta(q_id, bloco, texto, tipo):
             "bloco": bloco,
             "id_pergunta": q_id,
             "enunciado": texto,
-            "resposta": valor_raw,
+            "resposta": val_clean,
             "setor": "Geral"
         }
         threading.Thread(target=enviar_resposta_background, args=(payload,), daemon=True).start()
@@ -177,7 +178,7 @@ with aba_pesquisa:
                 except Exception:
                     pass
             
-            if saved_bloco is not None or saved_sessao is not None:
+            if saved_bloco is not None or saved_sessao is not None or saved_resp is not None:
                 st.session_state.restaurado = True
 
     if not st.session_state.id_sessao:
@@ -207,7 +208,7 @@ with aba_pesquisa:
             
             st.info("⏱️ **Leva poucos minutos.** As perguntas estão organizadas por tema e usam formatos rápidos: escalas de 1 a 5, sim ou não e alguns campos abertos para quem quiser se aprofundar.")
             st.warning("🤝 **Seja honesto(a).** Essa pesquisa só cumpre seu propósito se refletir a realidade, inclusive os pontos difíceis. Toda resposta é bem-vinda, elogio ou crítica.")
-            st.success("✅ Depois da aplicação, vamos compartilhar os resultados gerais e o plano de ação. Responder à pesquisa é o primeiro passo para transformar perception em mudança real. **Contamos com a sua participação!**")
+            st.success("✅ Depois da aplicação, vamos compartilhar os resultados gerais e o plano de ação. Responder à pesquisa é o primeiro passo para transformar percepção em mudança real. **Contamos com a sua participação!**")
             
             st.markdown("---")
             st.markdown("### Nossa Identidade")
@@ -238,29 +239,46 @@ with aba_pesquisa:
             
             for q in perguntas_atuais:
                 q_key = f"q_{q['id']}"
+                ui_key = f"ui_q_{q['id']}"
                 st.markdown(f"**{q['texto']}**")
                 
                 if q["tipo"] == "radio":
-                    valor_previo = st.session_state.respostas.get(q_key, None)
-                    options = q["opcoes"]
-                    idx_default = options.index(valor_previo) if valor_previo in options else None
+                    options = [str(opt).strip() for opt in q["opcoes"]]
+                    saved_val = st.session_state.respostas.get(q_key)
                     
-                    resposta = st.radio(
-                        label=q['texto'], label_visibility="collapsed",
-                        options=options, index=idx_default, key=f"ui_q_{q['id']}",
-                        on_change=auto_salvar_resposta,
-                        args=(q['id'], bloco_nome, q['texto'], q['tipo'])
-                    )
-                    if resposta:
-                        st.session_state.respostas[q_key] = resposta
+                    # Sincronização prévia: Garante que o componente recupere o valor salvo
+                    if saved_val is not None and str(saved_val).strip() in options:
+                        st.session_state[ui_key] = str(saved_val).strip()
+                    
+                    if ui_key in st.session_state and st.session_state[ui_key] in options:
+                        idx_default = options.index(st.session_state[ui_key])
+                        resposta = st.radio(
+                            label=q['texto'], label_visibility="collapsed",
+                            options=options, index=idx_default, key=ui_key,
+                            on_change=auto_salvar_resposta,
+                            args=(q['id'], bloco_nome, q['texto'], q['tipo'])
+                        )
+                    else:
+                        resposta = st.radio(
+                            label=q['texto'], label_visibility="collapsed",
+                            options=options, index=None, key=ui_key,
+                            on_change=auto_salvar_resposta,
+                            args=(q['id'], bloco_nome, q['texto'], q['tipo'])
+                        )
+                    
+                    if resposta is not None and str(resposta).strip() != "":
+                        st.session_state.respostas[q_key] = str(resposta).strip()
                     else:
                         bloco_completo = False
                         
                 elif q["tipo"] == "aberta":
-                    valor_previo = st.session_state.respostas.get(q_key, "")
+                    saved_val = str(st.session_state.respostas.get(q_key, ""))
+                    if saved_val and ui_key not in st.session_state:
+                        st.session_state[ui_key] = saved_val
+                    
                     resposta_texto = st.text_area(
                         label=q['texto'], label_visibility="collapsed",
-                        value=valor_previo, key=f"ui_q_{q['id']}",
+                        key=ui_key,
                         on_change=auto_salvar_resposta,
                         args=(q['id'], bloco_nome, q['texto'], q['tipo'])
                     )
