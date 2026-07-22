@@ -10,8 +10,8 @@ import time
 
 st.set_page_config(page_title="Pesquisa de Clima Barracuda", page_icon="🏨", layout="centered")
 
-# ➔ URL DO GOOGLE SCRIPTS CORRIGIDA (Sem o 'z' incorreto)
-URL_WEB_APP = "https://script.google.com/macros/s/AKfycbzvxIXvcisyDL5ljMD8gSwYwKhF_bFdvKtG2M-_D1G7Rv26-TfFd-vYR-zxJ0PNIU-XtA/exec"
+# ➔ URL DO GOOGLE SCRIPTS
+URL_WEB_APP = "https://script.google.com/macros/s/AKfycbvxIXvcisyDL5ljMD8gSwYwKhF_bFdvKtG2M-_D1G7Rv26-TfFd-vYR-zxJ0PNIU-XtA/exec"
 SENHA_ADMIN = "RH2026"
 
 cookie_manager = stx.CookieManager(key="barracuda_cookies_manager")
@@ -70,7 +70,7 @@ for p in PERGUNTAS_RAW:
 LISTA_BLOCOS = list(PERGUNTAS_POR_BLOCO.keys())
 
 # ==============================================================================
-# INICIALIZAÇÃO DO SESSION STATE
+# INICIALIZAÇÃO DO SESSION STATE E SALVAMENTO DE COOKIES
 # ==============================================================================
 if 'bloco_index' not in st.session_state: st.session_state.bloco_index = -1
 if 'respostas' not in st.session_state: st.session_state.respostas = {}
@@ -78,7 +78,6 @@ if 'id_sessao' not in st.session_state: st.session_state.id_sessao = None
 if 'enviado' not in st.session_state: st.session_state.enviado = False
 if 'restaurado' not in st.session_state: st.session_state.restaurado = False
 
-# Salva o progresso no navegador com chave ESTÁTICA
 def salvar_progresso_cookie():
     if cookie_manager and not st.session_state.enviado:
         prog = {
@@ -86,9 +85,14 @@ def salvar_progresso_cookie():
             "sessao": st.session_state.id_sessao,
             "respostas": st.session_state.respostas
         }
-        cookie_manager.set(cookie=f"{RODADA_ATUAL}_progress", val=json.dumps(prog), key="static_prog_cookie_key")
+        # Timestamp dinâmico força atualização em tempo real no navegador
+        cookie_manager.set(
+            cookie=f"{RODADA_ATUAL}_progress",
+            val=json.dumps(prog),
+            max_age=7776000,
+            key=f"sync_prog_{time.time()}"
+        )
 
-# Envio de resposta em segundo plano (Silencioso)
 def enviar_resposta_background(payload):
     try:
         req = urllib.request.Request(
@@ -127,6 +131,8 @@ def auto_salvar_resposta(q_id, bloco, texto, tipo):
         }
         threading.Thread(target=enviar_resposta_background, args=(payload,), daemon=True).start()
 
+    salvar_progresso_cookie()
+
 # Callbacks de Navegação
 def callback_iniciar_pesquisa():
     st.session_state.bloco_index = 0
@@ -151,12 +157,37 @@ aba_pesquisa, aba_admin = st.tabs(["📝 Responder Pesquisa", "⚙️ Painel de 
 # ABA 1: FLUXO DO COLABORADOR
 # ==============================================================================
 with aba_pesquisa:
-    # 1. LEITURA DOS COOKIES
+    # 1. LEITURA DOS COOKIES DO NAVEGADOR
     all_cookies = cookie_manager.get_all() if cookie_manager else {}
-    is_done_cookie = (all_cookies.get(RODADA_ATUAL) == "respondido")
+    is_done_cookie = (all_cookies.get(RODADA_ATUAL) == "respondido") if all_cookies else False
     is_done_session = st.session_state.get("enviado", False)
 
-    # 2. TRAVA ABSOLUTA DE SEGURANÇA
+    # 2. RESTAURAÇÃO DE PROGRESSO INTELIGENTE
+    if not st.session_state.restaurado and cookie_manager:
+        progress_raw = cookie_manager.get(f"{RODADA_ATUAL}_progress")
+        
+        if is_done_cookie:
+            st.session_state.enviado = True
+            st.session_state.restaurado = True
+        elif progress_raw:
+            try:
+                prog_data = json.loads(progress_raw)
+                if "respostas" in prog_data and isinstance(prog_data["respostas"], dict):
+                    st.session_state.respostas = prog_data["respostas"]
+                if "sessao" in prog_data and prog_data["sessao"]:
+                    st.session_state.id_sessao = prog_data["sessao"]
+                if "bloco" in prog_data and isinstance(prog_data["bloco"], int):
+                    st.session_state.bloco_index = prog_data["bloco"]
+            except Exception:
+                pass
+            st.session_state.restaurado = True
+        elif all_cookies: # Confirma que a ponte JS carregou e realmente não há cookies salvos
+            st.session_state.restaurado = True
+
+    if not st.session_state.id_sessao:
+        st.session_state.id_sessao = f"S_{str(uuid.uuid4())[:8]}"
+
+    # 3. EXIBIÇÃO DAS TELAS
     if is_done_cookie or is_done_session:
         st.balloons()
         st.warning("### ⚠️ Participação já registrada!")
@@ -165,29 +196,8 @@ with aba_pesquisa:
     elif not LISTA_BLOCOS:
         st.info("Carregando as perguntas... Verifique se o arquivo perguntas.json foi enviado ao GitHub.")
     else:
-        # 3. RESTAURAÇÃO DE PROGRESSO PARA PESQUISAS EM ANDAMENTO
-        if not st.session_state.restaurado and LISTA_BLOCOS:
-            progress_raw = all_cookies.get(f"{RODADA_ATUAL}_progress")
-            
-            if progress_raw:
-                try:
-                    prog_data = json.loads(progress_raw)
-                    if "respostas" in prog_data and isinstance(prog_data["respostas"], dict):
-                        st.session_state.respostas = prog_data["respostas"]
-                    if "sessao" in prog_data and prog_data["sessao"]:
-                        st.session_state.id_sessao = prog_data["sessao"]
-                    if "bloco" in prog_data and isinstance(prog_data["bloco"], int):
-                        st.session_state.bloco_index = prog_data["bloco"]
-                except Exception:
-                    pass
-            
-            if not st.session_state.id_sessao:
-                st.session_state.id_sessao = f"S_{str(uuid.uuid4())[:8]}"
-            
-            st.session_state.restaurado = True
-
         # ------------------------------------------------------------------
-        # TELA DE BOAS-VINDAS OFICIAL DO BARRACUDA (BLOCO -1)
+        # TELA DE BOAS-VINDAS (BLOCO -1)
         # ------------------------------------------------------------------
         if st.session_state.bloco_index == -1:
             st.markdown("### Seja bem-vindo(a) à nossa Pesquisa de Clima Organizacional – Ciclo 2026")
@@ -289,13 +299,9 @@ with aba_pesquisa:
                                 )
                                 with urllib.request.urlopen(req, timeout=10) as res:
                                     if "Success" in res.read().decode('utf-8'):
-                                        # 1. Grava o cookie definitivo de travamento
                                         cookie_manager.set(cookie=RODADA_ATUAL, val="respondido", max_age=7776000, key=f"set_done_{RODADA_ATUAL}")
-                                        
-                                        # 2. Apaga o cookie temporário de progresso
                                         cookie_manager.set(cookie=f"{RODADA_ATUAL}_progress", val="", max_age=0, key=f"del_prog_{RODADA_ATUAL}")
                                         
-                                        # 3. Atualiza estado local de envio
                                         st.session_state.enviado = True
                                         st.session_state.respostas = {}
                                         st.session_state.bloco_index = -1
