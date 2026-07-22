@@ -4,7 +4,6 @@ import pandas as pd
 from datetime import datetime
 import urllib.request
 import json
-import time
 import uuid
 import threading
 
@@ -82,7 +81,7 @@ if 'id_sessao' not in st.session_state: st.session_state.id_sessao = None
 if 'enviado' not in st.session_state: st.session_state.enviado = False
 if 'restaurado' not in st.session_state: st.session_state.restaurado = False
 
-# Função para salvar no Cookie em Pacote Único (Evita conflitos de gravação)
+# Salva o progresso no navegador com chave ESTÁTICA (Sem pulo de tela)
 def salvar_progresso_cookie():
     if cookie_manager and not st.session_state.enviado:
         prog = {
@@ -91,9 +90,9 @@ def salvar_progresso_cookie():
             "sessao": st.session_state.id_sessao,
             "respostas": st.session_state.respostas
         }
-        cookie_manager.set(cookie=f"{RODADA_ATUAL}_progress", val=json.dumps(prog), key=f"prog_{time.time()}")
+        cookie_manager.set(cookie=f"{RODADA_ATUAL}_progress", val=json.dumps(prog), key="static_prog_cookie_key")
 
-# Envio de resposta em segundo plano
+# Envio de resposta em segundo plano (Silencioso e sem re-render)
 def enviar_resposta_background(payload):
     try:
         req = urllib.request.Request(
@@ -132,8 +131,6 @@ def auto_salvar_resposta(q_id, bloco, texto, tipo):
             "setor": setor
         }
         threading.Thread(target=enviar_resposta_background, args=(payload,), daemon=True).start()
-    
-    salvar_progresso_cookie()
 
 # Callbacks de Navegação
 def callback_iniciar_pesquisa():
@@ -164,7 +161,7 @@ with aba_pesquisa:
     is_done_cookie = (all_cookies.get(RODADA_ATUAL) == "respondido")
     is_done_session = st.session_state.get("enviado", False)
 
-    # 2. TRAVA ABSOLUTA DE SEGURANÇA (Bloqueia o dispositivo se já respondeu)
+    # 2. TRAVA ABSOLUTA DE SEGURANÇA
     if is_done_cookie or is_done_session:
         st.balloons()
         st.warning("### ⚠️ Participação já registrada!")
@@ -311,20 +308,19 @@ with aba_pesquisa:
                                 )
                                 with urllib.request.urlopen(req, timeout=10) as res:
                                     if "Success" in res.read().decode('utf-8'):
-                                        # 1. Grava o cookie definitivo de travamento no navegador
+                                        # 1. Grava o cookie definitivo de travamento
                                         cookie_manager.set(cookie=RODADA_ATUAL, val="respondido", max_age=7776000, key=f"set_done_{RODADA_ATUAL}")
                                         
                                         # 2. Apaga o cookie temporário de progresso
                                         cookie_manager.set(cookie=f"{RODADA_ATUAL}_progress", val="", max_age=0, key=f"del_prog_{RODADA_ATUAL}")
                                         
-                                        # 3. Marca o estado da sessão como enviado
+                                        # 3. Atualiza estado local de envio
                                         st.session_state.enviado = True
                                         st.session_state.respostas = {}
                                         st.session_state.bloco_index = -1
                                         st.session_state.setor_selecionado = None
                                         st.session_state.id_sessao = None
                                         
-                                        # 4. Mensagem de Sucesso (Renderizada diretamente sem forçar st.rerun)
                                         st.balloons()
                                         st.success("### 🎉 Respostas enviadas com sucesso!")
                                         st.info("Obrigado! Sua participação foi registrada de forma 100% anônima e este dispositivo foi bloqueado para novos envios neste ciclo.")
@@ -378,7 +374,6 @@ with aba_admin:
                     if "Success" in res.read().decode('utf-8'):
                         st.success("O identificador mudou na nuvem! Nova pesquisa iniciada com sucesso.")
                         st.cache_data.clear()
-                        time.sleep(2)
                         st.rerun()
             except Exception as e:
                 st.error(f"Falha ao executar reset remoto: {e}")
