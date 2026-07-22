@@ -14,6 +14,7 @@ st.set_page_config(page_title="Pesquisa de Clima Barracuda", page_icon="🏨", l
 URL_WEB_APP = "https://script.google.com/macros/s/AKfycbvxIXvcisyDL5ljMD8gSwYwKhF_bFdvKtG2M-_D1G7Rv26-TfFd-vYR-zxJ0PNIU-XtA/exec"
 SENHA_ADMIN = "RH2026"
 
+# Instância fixa do CookieManager (Evita re-renderizações e pulos de tela)
 cookie_manager = stx.CookieManager(key="barracuda_cookies_manager")
 
 # ==============================================================================
@@ -70,7 +71,7 @@ for p in PERGUNTAS_RAW:
 LISTA_BLOCOS = list(PERGUNTAS_POR_BLOCO.keys())
 
 # ==============================================================================
-# INICIALIZAÇÃO DO SESSION STATE E SALVAMENTO DE COOKIES
+# INICIALIZAÇÃO DO SESSION STATE E SALVAMENTO ESTÁVEL
 # ==============================================================================
 if 'bloco_index' not in st.session_state: st.session_state.bloco_index = -1
 if 'respostas' not in st.session_state: st.session_state.respostas = {}
@@ -79,19 +80,22 @@ if 'enviado' not in st.session_state: st.session_state.enviado = False
 if 'restaurado' not in st.session_state: st.session_state.restaurado = False
 
 def salvar_progresso_cookie():
+    """Salva o progresso no navegador sem recriar o componente (Evita pular tela)"""
     if cookie_manager and not st.session_state.enviado:
         prog = {
             "bloco": st.session_state.bloco_index,
             "sessao": st.session_state.id_sessao,
             "respostas": st.session_state.respostas
         }
-        # Timestamp dinâmico força atualização em tempo real no navegador
-        cookie_manager.set(
-            cookie=f"{RODADA_ATUAL}_progress",
-            val=json.dumps(prog),
-            max_age=7776000,
-            key=f"sync_prog_{time.time()}"
-        )
+        try:
+            cookie_manager.set(
+                cookie=f"{RODADA_ATUAL}_progress",
+                val=json.dumps(prog),
+                max_age=7776000,
+                key="save_progress_static_key"
+            )
+        except Exception:
+            pass
 
 def enviar_resposta_background(payload):
     try:
@@ -112,9 +116,7 @@ def auto_salvar_resposta(q_id, bloco, texto, tipo):
     if valor_raw is None or valor_raw == "":
         return
         
-    resposta_final = valor_raw
-    st.session_state.respostas[f"q_{q_id}"] = resposta_final
-    
+    st.session_state.respostas[f"q_{q_id}"] = valor_raw
     id_sessao = st.session_state.get("id_sessao")
     
     if id_sessao:
@@ -126,7 +128,7 @@ def auto_salvar_resposta(q_id, bloco, texto, tipo):
             "bloco": bloco,
             "id_pergunta": q_id,
             "enunciado": texto,
-            "resposta": resposta_final,
+            "resposta": valor_raw,
             "setor": "Geral"
         }
         threading.Thread(target=enviar_resposta_background, args=(payload,), daemon=True).start()
@@ -157,38 +159,32 @@ aba_pesquisa, aba_admin = st.tabs(["📝 Responder Pesquisa", "⚙️ Painel de 
 # ABA 1: FLUXO DO COLABORADOR
 # ==============================================================================
 with aba_pesquisa:
-    # 1. LEITURA DOS COOKIES DO NAVEGADOR
-    all_cookies = cookie_manager.get_all() if cookie_manager else {}
-    is_done_cookie = (all_cookies.get(RODADA_ATUAL) == "respondido") if all_cookies else False
-    is_done_session = st.session_state.get("enviado", False)
-
-    # 2. RESTAURAÇÃO DE PROGRESSO INTELIGENTE
+    # 1. RECUPERAÇÃO DE COOKIES DO NAVEGADOR (COM ESPERA ATIVA DE CARREGAMENTO)
     if not st.session_state.restaurado and cookie_manager:
+        is_done_cookie = cookie_manager.get(RODADA_ATUAL)
         progress_raw = cookie_manager.get(f"{RODADA_ATUAL}_progress")
         
-        if is_done_cookie:
+        if is_done_cookie == "respondido":
             st.session_state.enviado = True
             st.session_state.restaurado = True
         elif progress_raw:
             try:
                 prog_data = json.loads(progress_raw)
-                if "respostas" in prog_data and isinstance(prog_data["respostas"], dict):
+                if isinstance(prog_data.get("respostas"), dict):
                     st.session_state.respostas = prog_data["respostas"]
-                if "sessao" in prog_data and prog_data["sessao"]:
+                if prog_data.get("sessao"):
                     st.session_state.id_sessao = prog_data["sessao"]
-                if "bloco" in prog_data and isinstance(prog_data["bloco"], int):
+                if isinstance(prog_data.get("bloco"), int):
                     st.session_state.bloco_index = prog_data["bloco"]
+                st.session_state.restaurado = True
             except Exception:
                 pass
-            st.session_state.restaurado = True
-        elif all_cookies: # Confirma que a ponte JS carregou e realmente não há cookies salvos
-            st.session_state.restaurado = True
 
     if not st.session_state.id_sessao:
         st.session_state.id_sessao = f"S_{str(uuid.uuid4())[:8]}"
 
-    # 3. EXIBIÇÃO DAS TELAS
-    if is_done_cookie or is_done_session:
+    # 2. TRAVA DE SEGURANÇA SE JÁ RESPONDEU
+    if st.session_state.enviado:
         st.balloons()
         st.warning("### ⚠️ Participação já registrada!")
         st.info("Obrigado! Você já computou as respostas de forma 100% anônima.")
@@ -299,8 +295,8 @@ with aba_pesquisa:
                                 )
                                 with urllib.request.urlopen(req, timeout=10) as res:
                                     if "Success" in res.read().decode('utf-8'):
-                                        cookie_manager.set(cookie=RODADA_ATUAL, val="respondido", max_age=7776000, key=f"set_done_{RODADA_ATUAL}")
-                                        cookie_manager.set(cookie=f"{RODADA_ATUAL}_progress", val="", max_age=0, key=f"del_prog_{RODADA_ATUAL}")
+                                        cookie_manager.set(cookie=RODADA_ATUAL, val="respondido", max_age=7776000, key="set_done_final_key")
+                                        cookie_manager.set(cookie=f"{RODADA_ATUAL}_progress", val="", max_age=0, key="del_prog_final_key")
                                         
                                         st.session_state.enviado = True
                                         st.session_state.respostas = {}
