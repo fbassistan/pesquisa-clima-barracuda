@@ -5,7 +5,6 @@ from datetime import datetime
 import urllib.request
 import json
 import time
-import hashlib
 import uuid
 import threading
 
@@ -57,7 +56,7 @@ def buscar_adesao_nuvem():
 RODADA_ATUAL = buscar_rodada_ativa()
 PERGUNTAS_RAW = buscar_perguntas_nuvem()
 
-# Agrupa as perguntas dinâmicas em blocos temáticos lendo do JSON/Sheets
+# Agrupa as perguntas dinâmicas em blocos temáticos
 PERGUNTAS_POR_BLOCO = {}
 for p in PERGUNTAS_RAW:
     bloco = p.get("bloco", "Geral").strip()
@@ -74,7 +73,7 @@ for p in PERGUNTAS_RAW:
 LISTA_BLOCOS = list(PERGUNTAS_POR_BLOCO.keys())
 
 # ==============================================================================
-# INICIALIZAÇÃO DO SESSION STATE E AUTO-SALVAMENTO
+# INICIALIZAÇÃO DO SESSION STATE
 # ==============================================================================
 if 'bloco_index' not in st.session_state: st.session_state.bloco_index = -1
 if 'respostas' not in st.session_state: st.session_state.respostas = {}
@@ -82,6 +81,17 @@ if 'setor_selecionado' not in st.session_state: st.session_state.setor_seleciona
 if 'id_sessao' not in st.session_state: st.session_state.id_sessao = None
 if 'enviado' not in st.session_state: st.session_state.enviado = False
 if 'restaurado' not in st.session_state: st.session_state.restaurado = False
+
+# Função para salvar no Cookie em Pacote Único (Evita conflitos de gravação)
+def salvar_progresso_cookie():
+    if cookie_manager and not st.session_state.enviado:
+        prog = {
+            "bloco": st.session_state.bloco_index,
+            "setor": st.session_state.setor_selecionado,
+            "sessao": st.session_state.id_sessao,
+            "respostas": st.session_state.respostas
+        }
+        cookie_manager.set(f"{RODADA_ATUAL}_progress", json.dumps(prog), key=f"prog_{time.time()}")
 
 # Envio de resposta em segundo plano
 def enviar_resposta_background(payload):
@@ -109,40 +119,37 @@ def auto_salvar_resposta(q_id, bloco, texto, tipo):
     id_sessao = st.session_state.get("id_sessao")
     setor = st.session_state.get("setor_selecionado")
     
-    if not id_sessao or not setor:
-        return
-        
-    payload = {
-        "acao": "salvar_resposta_avulsa",
-        "id_sessao": id_sessao,
-        "data_hora": datetime.now().strftime("%d/%m/%Y %H:%M"),
-        "rodada": RODADA_ATUAL,
-        "bloco": bloco,
-        "id_pergunta": q_id,
-        "enunciado": texto,
-        "resposta": resposta_final,
-        "setor": setor
-    }
-    threading.Thread(target=enviar_resposta_background, args=(payload,), daemon=True).start()
+    if id_sessao and setor:
+        payload = {
+            "acao": "salvar_resposta_avulsa",
+            "id_sessao": id_sessao,
+            "data_hora": datetime.now().strftime("%d/%m/%Y %H:%M"),
+            "rodada": RODADA_ATUAL,
+            "bloco": bloco,
+            "id_pergunta": q_id,
+            "enunciado": texto,
+            "resposta": resposta_final,
+            "setor": setor
+        }
+        threading.Thread(target=enviar_resposta_background, args=(payload,), daemon=True).start()
+    
+    salvar_progresso_cookie()
 
 # Callbacks de Navegação
 def callback_iniciar_pesquisa():
     st.session_state.bloco_index = 0
-    if cookie_manager:
-        cookie_manager.set(f"{RODADA_ATUAL}_bloco", "0", key=f"btn_init_{time.time()}")
+    salvar_progresso_cookie()
 
 def callback_voltar_tema():
     if st.session_state.bloco_index == 0:
         st.session_state.bloco_index = -1
     else:
         st.session_state.bloco_index -= 1
-    if cookie_manager:
-        cookie_manager.set(f"{RODADA_ATUAL}_bloco", str(st.session_state.bloco_index), key=f"btn_back_{time.time()}")
+    salvar_progresso_cookie()
 
 def callback_avancar_tema():
     st.session_state.bloco_index += 1
-    if cookie_manager:
-        cookie_manager.set(f"{RODADA_ATUAL}_bloco", str(st.session_state.bloco_index), key=f"btn_next_{time.time()}")
+    salvar_progresso_cookie()
 
 st.title("🔒 Pesquisa de Clima Organizacional")
 
@@ -152,48 +159,41 @@ aba_pesquisa, aba_admin = st.tabs(["📝 Responder Pesquisa", "⚙️ Painel de 
 # ABA 1: FLUXO DO COLABORADOR
 # ==============================================================================
 with aba_pesquisa:
-    cookie_status = cookie_manager.get(RODADA_ATUAL) if cookie_manager else None
-    
-    # TRAVA PRIORITÁRIA: Se já foi enviado nesta sessão OU se o cookie indica "respondido"
-    if st.session_state.enviado or cookie_status == "respondido":
+    # 1. LEITURA DOS COOKIES
+    all_cookies = cookie_manager.get_all() if cookie_manager else {}
+    is_done_cookie = (all_cookies.get(RODADA_ATUAL) == "respondido")
+    is_done_session = st.session_state.get("enviado", False)
+
+    # 2. TRAVA ABSOLUTA DE SEGURANÇA (Interrompe qualquer carregamento adicional)
+    if is_done_cookie or is_done_session:
         st.balloons()
         st.warning("### ⚠️ Participação já registrada!")
         st.info("Obrigado! Seu dispositivo já computou as respostas para este ciclo de forma 100% anônima.")
-        
+    
     elif not LISTA_BLOCOS:
         st.info("Carregando as perguntas... Verifique se o arquivo perguntas.json foi enviado ao GitHub.")
     else:
-        # ------------------------------------------------------------------
-        # RESTAURAÇÃO DE ESTADO INTELIGENTE (APENAS PARA PESQUISAS EM ANDAMENTO)
-        # ------------------------------------------------------------------
+        # 3. RESTAURAÇÃO DE PROGRESSO PARA PESQUISAS EM ANDAMENTO
         if not st.session_state.restaurado and LISTA_BLOCOS:
-            saved_respostas = cookie_manager.get(f"{RODADA_ATUAL}_respostas")
-            saved_bloco = cookie_manager.get(f"{RODADA_ATUAL}_bloco")
-            saved_setor = cookie_manager.get(f"{RODADA_ATUAL}_setor")
-            saved_sessao = cookie_manager.get(f"{RODADA_ATUAL}_sessao_id")
+            progress_raw = all_cookies.get(f"{RODADA_ATUAL}_progress")
             
-            if saved_sessao:
-                st.session_state.id_sessao = saved_sessao
-            elif not st.session_state.id_sessao:
+            if progress_raw:
+                try:
+                    prog_data = json.loads(progress_raw)
+                    if "respostas" in prog_data and isinstance(prog_data["respostas"], dict):
+                        st.session_state.respostas = prog_data["respostas"]
+                    if "setor" in prog_data and prog_data["setor"]:
+                        st.session_state.setor_selecionado = prog_data["setor"]
+                    if "sessao" in prog_data and prog_data["sessao"]:
+                        st.session_state.id_sessao = prog_data["sessao"]
+                    if "bloco" in prog_data and isinstance(prog_data["bloco"], int):
+                        st.session_state.bloco_index = prog_data["bloco"]
+                except Exception:
+                    pass
+            
+            if not st.session_state.id_sessao:
                 st.session_state.id_sessao = f"S_{str(uuid.uuid4())[:8]}"
-                cookie_manager.set(f"{RODADA_ATUAL}_sessao_id", st.session_state.id_sessao, key=f"set_sessao_id_{RODADA_ATUAL}")
-
-            if saved_setor and st.session_state.setor_selecionado is None:
-                st.session_state.setor_selecionado = saved_setor
-
-            if saved_respostas and not st.session_state.respostas:
-                try:
-                    st.session_state.respostas = json.loads(saved_respostas)
-                except Exception: pass
-
-            # Se o cookie do bloco estiver salvo como "-1" ou não existir, fica no início
-            if saved_bloco is not None:
-                try:
-                    idx_cookie = int(saved_bloco)
-                    st.session_state.bloco_index = idx_cookie
-                except ValueError:
-                    st.session_state.bloco_index = -1
-
+            
             st.session_state.restaurado = True
 
         # ------------------------------------------------------------------
@@ -311,15 +311,10 @@ with aba_pesquisa:
                                 )
                                 with urllib.request.urlopen(req, timeout=10) as res:
                                     if "Success" in res.read().decode('utf-8'):
-                                        # 1. Define o cookie principal de travamento
+                                        # Grava APENAS o cookie de trava definitivo (Sem colisões)
                                         cookie_manager.set(RODADA_ATUAL, "respondido", max_age=7776000, key=f"set_done_{RODADA_ATUAL}")
                                         
-                                        # 2. Reseta os cookies temporários sobrescrevendo com estado limpo
-                                        cookie_manager.set(f"{RODADA_ATUAL}_bloco", "-1", key=f"rst_bloco_{RODADA_ATUAL}")
-                                        cookie_manager.set(f"{RODADA_ATUAL}_respostas", "{}", key=f"rst_resp_{RODADA_ATUAL}")
-                                        cookie_manager.set(f"{RODADA_ATUAL}_setor", "", key=f"rst_setor_{RODADA_ATUAL}")
-                                        
-                                        # 3. Zera o Session State
+                                        # Zera o Session State local
                                         st.session_state.respostas = {}
                                         st.session_state.bloco_index = -1
                                         st.session_state.setor_selecionado = None
@@ -331,19 +326,6 @@ with aba_pesquisa:
                                 st.error(f"Erro ao concluir pesquisa: {e}")
                     if not bloco_completo:
                         st.caption("⚠️ Responda a todas as questões de múltipla escolha para liberar o envio.")
-
-# ==============================================================================
-# SINCRONIZAÇÃO DE SEGURANÇA EM SEGUNDO PLANO
-# ==============================================================================
-if cookie_manager and not st.session_state.enviado and cookie_status != "respondido":
-    if st.session_state.bloco_index >= 0:
-        cookie_manager.set(f"{RODADA_ATUAL}_bloco", str(st.session_state.bloco_index), key="sync_bloco_curr")
-        if st.session_state.setor_selecionado:
-            cookie_manager.set(f"{RODADA_ATUAL}_setor", st.session_state.setor_selecionado, key="sync_setor_curr")
-            
-        respostas_str = json.dumps(st.session_state.respostas, sort_keys=True)
-        respostas_hash = hashlib.md5(respostas_str.encode()).hexdigest()[:8]
-        cookie_manager.set(f"{RODADA_ATUAL}_respostas", respostas_str, key=f"sync_resp_{respostas_hash}")
 
 # ==============================================================================
 # ABA 2: CONTROLE DO ADMINISTRADOR
