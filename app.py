@@ -160,7 +160,7 @@ with aba_pesquisa:
     if is_done_cookie or is_done_session:
         st.balloons()
         st.warning("### ⚠️ Participação já registrada!")
-        st.info("Obrigado! Seu dispositivo já computou as respostas para este ciclo de forma 100% anônima.")
+        st.info("Obrigado! Você já computou as respostas de forma 100% anônima.")
     
     elif not LISTA_BLOCOS:
         st.info("Carregando as perguntas... Verifique se o arquivo perguntas.json foi enviado ao GitHub.")
