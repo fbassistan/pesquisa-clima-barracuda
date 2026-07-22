@@ -323,7 +323,7 @@ with aba_pesquisa:
                                         
                                         st.balloons()
                                         st.success("### 🎉 Respostas enviadas com sucesso!")
-                                        st.info("Obrigado! Sua participação foi registrada de forma 100% anônima e este dispositivo foi bloqueado para novos envios neste ciclo.")
+                                        st.info("Obrigado! Sua participação foi registrada de forma 100% anônima.")
                             except Exception as e:
                                 st.error(f"Erro ao concluir pesquisa: {e}")
                     if not bloco_completo:
