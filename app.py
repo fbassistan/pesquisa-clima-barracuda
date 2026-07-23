@@ -24,7 +24,7 @@ logger = logging.getLogger("pesquisa_clima")
 URL_OU_CAMINHO_LOGO = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRCoWtXmWKvlUcgGnpVEm56JhjQWztWcdAR6Q&s" 
 
 # ➔ PALETA DE CORES DA EMPRESA
-COR_FUNDO = "#DEB887"          # Cor de Fundo da Aplicação
+COR_FUNDO = "#FFDEAD"          # Cor de Fundo da Aplicação
 COR_PRIMARIA = "#5C3A21"       # Cor escura para Botões e Destaques (alta legibilidade sobre o fundo)
 COR_HOVER_BOTAO = "#3D2615"    # Cor ao passar o mouse por cima do botão
 
