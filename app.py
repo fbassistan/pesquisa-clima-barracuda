@@ -1,6 +1,7 @@
 import hmac
 import json
 import logging
+import threading
 import time
 import urllib.request
 import urllib.error
@@ -23,7 +24,7 @@ logger = logging.getLogger("pesquisa_clima")
 URL_WEB_APP = "https://script.google.com/macros/s/AKfycbzvxIXvcisyDL5ljMD8gSwYwKhF_bFdvKtG2M-_D1G7Rv26-TfFd-vYR-zxJ0PNIU-XtA/exec"
 SENHA_ADMIN = "RH2026"
 
-TIMEOUT_PADRAO = 10
+TIMEOUT_PADRAO = 12
 MAX_TENTATIVAS_LOGIN = 5
 BLOQUEIO_LOGIN_SEGUNDOS = 60
 
@@ -132,12 +133,13 @@ LISTA_BLOCOS = list(PERGUNTAS_POR_BLOCO.keys())
 _padroes = {
     "bloco_index": -1,
     "respostas": {},
-    "respostas_enviadas": {},  # Registra o que já foi efetivamente enviado
+    "respostas_enviadas": {},  # Controle rigoroso contra reenvio duplicado
     "id_sessao": None,
     "enviado": False,
     "restaurado": False,
     "tentativas_login": 0,
     "bloqueado_ate": 0.0,
+    "envios_pendentes": [],
 }
 for chave, valor in _padroes.items():
     if chave not in st.session_state:
@@ -175,48 +177,86 @@ def limpar_cookies_progresso():
         logger.warning("Falha ao limpar cookies: %s", e)
 
 
-def salvar_bloco_atual(perguntas_bloco: list, bloco_nome: str) -> bool:
-    """Envia todas as respostas não salvas do bloco atual em lote controlado."""
+def _enviar_resposta_background_sem_retry(payload: dict):
+    """Envia resposta sem retentativas automáticas no POST para evitar duplicidade."""
+    ok, _ = _chamar_api(payload=payload, method="POST", timeout=12, tentativas=1)
+    if not ok:
+        st.session_state.envios_pendentes.append(payload)
+
+
+def reenviar_pendentes():
+    """Reenvia automaticamente respostas que falharam previamente."""
+    if not st.session_state.envios_pendentes:
+        return
+    pendentes = list(st.session_state.envios_pendentes)
+    st.session_state.envios_pendentes = []
+    for payload in pendentes:
+        threading.Thread(target=_enviar_resposta_background_sem_retry, args=(payload,), daemon=True).start()
+
+
+def salvar_resposta_se_necessario(q_id: int, bloco: str, texto: str, val_clean: str, assincrono: bool = True):
+    """Função central com trava de deduplicação antes de qualquer chamada de rede."""
+    if not val_clean or not str(val_clean).strip():
+        return
+
+    val_clean = str(val_clean).strip()
+    q_key = f"q_{q_id}"
     id_sessao = st.session_state.get("id_sessao")
     if not id_sessao:
-        return False
+        return
 
-    sucesso = True
-    data_hora = datetime.now().strftime("%d/%m/%Y %H:%M")
+    # DEDUPLICAÇÃO GARANTIDA: Se este valor exato já foi enviado/processado, aborta imediatamente
+    if st.session_state.respostas_enviadas.get(q_key) == val_clean:
+        return
 
-    for q in perguntas_bloco:
+    # Registra no Session State IMEDIATAMENTE (Síncrono) para travar futuras chamadas simultâneas
+    st.session_state.respostas_enviadas[q_key] = val_clean
+    st.session_state.respostas[q_key] = val_clean
+
+    payload = {
+        "acao": "salvar_resposta_avulsa",
+        "id_sessao": id_sessao,
+        "data_hora": datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "rodada": RODADA_ATUAL,
+        "bloco": bloco,
+        "id_pergunta": q_id,
+        "enunciado": texto,
+        "resposta": val_clean,
+        "setor": "Geral",
+    }
+
+    if assincrono:
+        reenviar_pendentes()
+        threading.Thread(target=_enviar_resposta_background_sem_retry, args=(payload,), daemon=True).start()
+    else:
+        _chamar_api(payload=payload, method="POST", timeout=12, tentativas=1)
+
+
+def auto_salvar_resposta(q_id: int, bloco: str, texto: str, tipo: str):
+    ui_key = f"ui_q_{q_id}"
+    valor_raw = st.session_state.get(ui_key)
+    if valor_raw is not None and str(valor_raw).strip() != "":
+        salvar_resposta_se_necessario(q_id, bloco, texto, str(valor_raw).strip(), assincrono=True)
+
+
+def garantir_todas_respostas_salvas():
+    """Varre e garante que qualquer resposta pendente seja transmitida antes do encerramento."""
+    for q in PERGUNTAS_RAW:
         q_id = int(q["id"])
         q_key = f"q_{q_id}"
-        val_clean = str(st.session_state.respostas.get(q_key, "")).strip()
-
-        # Envia SOMENTE se houver resposta e ainda NÃO tiver sido registrada na planilha
-        if val_clean and st.session_state.respostas_enviadas.get(q_key) != val_clean:
-            payload = {
-                "acao": "salvar_resposta_avulsa",
-                "id_sessao": id_sessao,
-                "data_hora": data_hora,
-                "rodada": RODADA_ATUAL,
-                "bloco": bloco_nome,
-                "id_pergunta": q_id,
-                "enunciado": q.get("texto", "").strip(),
-                "resposta": val_clean,
-                "setor": "Geral",
-            }
-            ok, _ = _chamar_api(payload=payload, method="POST", timeout=10, tentativas=1)
-            if ok:
-                st.session_state.respostas_enviadas[q_key] = val_clean
-            else:
-                sucesso = False
-
-    return sucesso
+        val = st.session_state.respostas.get(q_key)
+        if val and str(val).strip():
+            bloco_nome = q.get("bloco", "Geral").strip()
+            salvar_resposta_se_necessario(q_id, bloco_nome, q.get("texto", "").strip(), str(val).strip(), assincrono=False)
 
 
-def verificar_bloco_completo(perguntas_bloco: list) -> bool:
-    """Verifica se todas as perguntas do bloco atual foram preenchidas."""
-    for q in perguntas_bloco:
+def verificar_bloco_completo(blocos_perguntas: list) -> bool:
+    """Verifica se todas as perguntas do bloco atual foram respondidas."""
+    for q in blocos_perguntas:
         q_id = int(q["id"])
+        ui_key = f"ui_q_{q_id}"
         q_key = f"q_{q_id}"
-        val = st.session_state.respostas.get(q_key, "")
+        val = st.session_state.get(ui_key) or st.session_state.respostas.get(q_key, "")
         if not val or not str(val).strip():
             return False
     return True
@@ -232,6 +272,11 @@ def callback_iniciar_pesquisa():
 
 def callback_voltar_tema():
     st.session_state.bloco_index = max(-1, st.session_state.bloco_index - 1)
+    salvar_progresso_cookie()
+
+
+def callback_avancar_tema():
+    st.session_state.bloco_index += 1
     salvar_progresso_cookie()
 
 
@@ -267,6 +312,10 @@ with aba_pesquisa:
             if saved_resp:
                 try:
                     st.session_state.respostas = json.loads(saved_resp)
+                    # Marca as respostas recuperadas do cookie como enviadas para evitar disparos
+                    st.session_state.respostas_enviadas = {
+                        k: str(v).strip() for k, v in st.session_state.respostas.items() if v
+                    }
                 except Exception:
                     pass
 
@@ -341,7 +390,9 @@ with aba_pesquisa:
 
                     resposta = st.radio(
                         label=q["texto"], label_visibility="collapsed",
-                        options=options, index=idx_default, key=ui_key
+                        options=options, index=idx_default, key=ui_key,
+                        on_change=auto_salvar_resposta,
+                        args=(q_id, bloco_nome, q["texto"], q["tipo"]),
                     )
 
                     if resposta:
@@ -353,7 +404,9 @@ with aba_pesquisa:
                         st.session_state[ui_key] = saved_val
 
                     resposta_texto = st.text_area(
-                        label=q["texto"], label_visibility="collapsed", key=ui_key
+                        label=q["texto"], label_visibility="collapsed", key=ui_key,
+                        on_change=auto_salvar_resposta,
+                        args=(q_id, bloco_nome, q["texto"], q["tipo"]),
                     )
 
                     if resposta_texto and resposta_texto.strip():
@@ -375,45 +428,38 @@ with aba_pesquisa:
                 if st.session_state.bloco_index < len(LISTA_BLOCOS) - 1:
                     if st.button("Avançar Tema ➡️", type="primary"):
                         if bloco_pronto:
-                            with st.spinner("Salvando respostas do tema..."):
-                                salvar_bloco_atual(perguntas_atuais, bloco_nome)
-                                st.session_state.bloco_index += 1
-                                salvar_progresso_cookie()
-                                st.rerun()
+                            callback_avancar_tema()
+                            st.rerun()
                         else:
                             st.warning("⚠️ Responda a todas as perguntas deste bloco (incluindo o campo de texto) para avançar.")
                 else:
                     if st.button("🚀 Concluir e Enviar", type="primary"):
                         if bloco_pronto:
                             with st.spinner("Concluindo sua participação..."):
-                                ok_bloco = salvar_bloco_atual(perguntas_atuais, bloco_nome)
+                                garantir_todas_respostas_salvas()
+                                payload = {
+                                    "acao": "concluir_pesquisa",
+                                    "id_sessao": st.session_state.id_sessao,
+                                    "rodada": RODADA_ATUAL,
+                                }
+                                ok, resposta_api = _chamar_api(payload=payload, method="POST", timeout=12, tentativas=1)
 
-                                if ok_bloco:
-                                    payload = {
-                                        "acao": "concluir_pesquisa",
-                                        "id_sessao": st.session_state.id_sessao,
-                                        "rodada": RODADA_ATUAL,
-                                    }
-                                    ok, resposta_api = _chamar_api(payload=payload, method="POST", timeout=12, tentativas=1)
+                                sucesso = ok and isinstance(resposta_api, str) and "Success" in resposta_api
+                                if sucesso:
+                                    limpar_cookies_progresso()
+                                    st.session_state.enviado = True
+                                    st.session_state.respostas = {}
+                                    st.session_state.respostas_enviadas = {}
+                                    st.session_state.bloco_index = -1
+                                    st.session_state.id_sessao = None
 
-                                    sucesso = ok and isinstance(resposta_api, str) and "Success" in resposta_api
-                                    if sucesso:
-                                        limpar_cookies_progresso()
-                                        st.session_state.enviado = True
-                                        st.session_state.respostas = {}
-                                        st.session_state.respostas_enviadas = {}
-                                        st.session_state.bloco_index = -1
-                                        st.session_state.id_sessao = None
-
-                                        st.balloons()
-                                        st.success("### 🎉 Respostas enviadas com sucesso!")
-                                        st.info("Obrigado! Sua participação foi registrada de forma 100% anônima.")
-                                        time.sleep(1.5)
-                                        st.rerun()
-                                    else:
-                                        st.error("Não foi possível concluir a pesquisa agora. Tente novamente.")
+                                    st.balloons()
+                                    st.success("### 🎉 Respostas enviadas com sucesso!")
+                                    st.info("Obrigado! Sua participação foi registrada de forma 100% anônima.")
+                                    time.sleep(1.5)
+                                    st.rerun()
                                 else:
-                                    st.error("Houve uma falha ao salvar as últimas respostas. Tente clicar em 'Concluir e Enviar' novamente.")
+                                    st.error("Não foi possível concluir o envio agora. Verifique sua conexão e tente novamente — suas respostas continuam salvas.")
                         else:
                             st.warning("⚠️ Responda a todas as perguntas deste bloco (incluindo o campo de texto) para concluir.")
 
