@@ -15,14 +15,13 @@ import pandas as pd
 import streamlit as st
 
 # ==============================================================================
-# CONFIGURAÇÃO
+# CONFIGURAÇÃO INICIAL
 # ==============================================================================
 st.set_page_config(page_title="Pesquisa de Clima Barracuda", page_icon="🏨", layout="centered")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("pesquisa_clima")
 
-# ➔ URL DO GOOGLE SCRIPTS E SENHA MASTER
 URL_WEB_APP = "https://script.google.com/macros/s/AKfycbzvxIXvcisyDL5ljMD8gSwYwKhF_bFdvKtG2M-_D1G7Rv26-TfFd-vYR-zxJ0PNIU-XtA/exec"
 SENHA_ADMIN = "RH2026"
 
@@ -31,16 +30,16 @@ MAX_TENTATIVAS = 3
 MAX_TENTATIVAS_LOGIN = 5
 BLOQUEIO_LOGIN_SEGUNDOS = 60
 
+# Instância única do CookieManager
 cookie_manager = stx.CookieManager(key="barracuda_cookies_manager")
 
-# Fila global Thread-Safe para evitar travamentos do Streamlit no Background
+# Fila global Thread-Safe para evitar quebras de contexto no Streamlit
 FILA_ENVIOS_PENDENTES = queue.Queue()
 
 # ==============================================================================
-# CLIENTE DE API — Comunicação com Google Apps Script
+# COMUNICAÇÃO COM API (GOOGLE SHEETS)
 # ==============================================================================
-def _chamar_api(acao_query: str = None, payload: dict = None, method: str = "GET",
-                timeout: int = TIMEOUT_PADRAO, tentativas: int = 1):
+def _chamar_api(acao_query: str = None, payload: dict = None, method: str = "GET", timeout: int = TIMEOUT_PADRAO, tentativas: int = 1):
     url = f"{URL_WEB_APP}?acao={acao_query}" if acao_query else URL_WEB_APP
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
     headers = {"Content-Type": "application/json"} if data else {}
@@ -57,11 +56,10 @@ def _chamar_api(acao_query: str = None, payload: dict = None, method: str = "GET
                     return True, bruto
         except (urllib.error.URLError, TimeoutError, OSError) as e:
             ultimo_erro = e
-            logger.warning("Falha na chamada '%s' (tentativa %s/%s): %s", acao_query or "POST", tentativa, tentativas, e)
             if tentativa < tentativas:
                 time.sleep(0.5 * tentativa)
 
-    logger.error("Chamada '%s' falhou definitivamente: %s", acao_query or "POST", ultimo_erro)
+    logger.error("Chamada falhou: %s", ultimo_erro)
     return False, None
 
 @st.cache_data(ttl=30)
@@ -86,15 +84,11 @@ def _validar_pergunta(p: dict) -> bool:
 def buscar_perguntas_nuvem() -> list:
     ok, dados = _chamar_api(acao_query="buscar_perguntas", timeout=10, tentativas=2)
     if ok and isinstance(dados, list):
-        validas = [p for p in dados if _validar_pergunta(p)]
-        return validas
-
+        return [p for p in dados if _validar_pergunta(p)]
     try:
         with open("perguntas.json", "r", encoding="utf-8") as f:
-            dados_local = json.load(f)
-            return [p for p in dados_local if _validar_pergunta(p)]
-    except Exception as e:
-        logger.error("Falha ao carregar perguntas: %s", e)
+            return [p for p in json.load(f) if _validar_pergunta(p)]
+    except Exception:
         return []
 
 @st.cache_data(ttl=10)
@@ -120,7 +114,7 @@ for p in PERGUNTAS_RAW:
 LISTA_BLOCOS = list(PERGUNTAS_POR_BLOCO.keys())
 
 # ==============================================================================
-# INICIALIZAÇÃO DO SESSION STATE
+# ESTADO DA SESSÃO E GERENCIAMENTO DE COOKIES COMPACTADO
 # ==============================================================================
 _padroes = {
     "bloco_index": -1,
@@ -130,15 +124,36 @@ _padroes = {
     "restaurado": False,
     "tentativas_login": 0,
     "bloqueado_ate": 0.0,
-    "atualizar_progresso_agora": False,
-    "concluir_pesquisa_agora": False,
+    "tela_sucesso": False
 }
 for chave, valor in _padroes.items():
     if chave not in st.session_state:
         st.session_state[chave] = valor
 
+def salvar_progresso_cookie():
+    """Salva todo o progresso em um único super-cookie codificado, usando chave fixa."""
+    if not cookie_manager or st.session_state.enviado:
+        return
+    try:
+        pacote = {
+            "b": st.session_state.bloco_index,
+            "s": st.session_state.id_sessao,
+            "r": st.session_state.respostas
+        }
+        pacote_b64 = base64.b64encode(json.dumps(pacote).encode('utf-8')).decode('utf-8')
+        # Chave absolutamente fixa evita o Erro 400 do Streamlit
+        cookie_manager.set(cookie=f"prog_{RODADA_ATUAL}", val=pacote_b64, max_age=7776000, key="ck_progresso_fixo")
+    except Exception as e:
+        logger.warning("Falha ao salvar cookie: %s", e)
+
+def concluir_pesquisa_cookies():
+    """Trava a pesquisa e apaga o progresso temporário."""
+    if cookie_manager:
+        cookie_manager.set(cookie=f"done_{RODADA_ATUAL}", val="true", max_age=7776000, key="ck_done_fixo")
+        cookie_manager.set(cookie=f"prog_{RODADA_ATUAL}", val="", max_age=0, key="ck_progresso_fixo")
+
 # ==============================================================================
-# WORKERS EM SEGUNDO PLANO
+# PROCESSAMENTO DE BACKGROUND
 # ==============================================================================
 def enviar_resposta_background(payload: dict):
     ok, _ = _chamar_api(payload=payload, method="POST", tentativas=MAX_TENTATIVAS)
@@ -153,15 +168,13 @@ def reenviar_pendentes():
 def auto_salvar_resposta(q_id: int, bloco: str, texto: str, tipo: str):
     ui_key = f"ui_q_{q_id}"
     valor_raw = st.session_state.get(ui_key)
-    if valor_raw is None or valor_raw == "":
+    if valor_raw is None or str(valor_raw).strip() == "":
         return
 
     val_clean = str(valor_raw).strip()
     st.session_state.respostas[f"q_{q_id}"] = val_clean
     id_sessao = st.session_state.get("id_sessao")
     
-    st.session_state.atualizar_progresso_agora = True
-
     if not id_sessao:
         return
 
@@ -178,104 +191,86 @@ def auto_salvar_resposta(q_id: int, bloco: str, texto: str, tipo: str):
     }
     reenviar_pendentes()
     threading.Thread(target=enviar_resposta_background, args=(payload,), daemon=True).start()
+    
+    # Grava o histórico local sem causar re-renderização extra
+    salvar_progresso_cookie()
 
 # ==============================================================================
-# CALLBACKS (Sinalizadores Limpos)
+# CALLBACKS DE INTERFACE
 # ==============================================================================
 def callback_iniciar_pesquisa():
     st.session_state.bloco_index = 0
-    st.session_state.atualizar_progresso_agora = True
+    salvar_progresso_cookie()
 
 def callback_voltar_tema():
     st.session_state.bloco_index = max(-1, st.session_state.bloco_index - 1)
-    st.session_state.atualizar_progresso_agora = True
+    salvar_progresso_cookie()
 
 def callback_avancar_tema():
     st.session_state.bloco_index += 1
-    st.session_state.atualizar_progresso_agora = True
+    salvar_progresso_cookie()
 
 # ==============================================================================
-# INTERFACE GRÁFICA (UI)
+# RENDERIZAÇÃO DA INTERFACE
 # ==============================================================================
 st.title("🔒 Pesquisa de Clima Organizacional")
 
 aba_pesquisa, aba_admin = st.tabs(["📝 Responder Pesquisa", "⚙️ Painel de Controle"])
 
-# ------------------------------------------------------------------------------
-# ABA 1: FLUXO DO COLABORADOR
-# ------------------------------------------------------------------------------
 with aba_pesquisa:
+    # 1. LEITURA DE COOKIES (Executado apenas 1x na abertura)
     all_cookies = cookie_manager.get_all() if cookie_manager else {}
 
     if not st.session_state.restaurado and all_cookies:
-        if all_cookies.get(RODADA_ATUAL) == "respondido":
+        if all_cookies.get(f"done_{RODADA_ATUAL}") == "true":
             st.session_state.enviado = True
             st.session_state.restaurado = True
         else:
-            saved_bloco = all_cookies.get(f"{RODADA_ATUAL}_bloco")
-            saved_sessao = all_cookies.get(f"{RODADA_ATUAL}_sessao")
-            saved_resp = all_cookies.get(f"{RODADA_ATUAL}_respostas")
-
-            if saved_sessao:
-                st.session_state.id_sessao = saved_sessao
-            if saved_bloco is not None:
+            prog_b64 = all_cookies.get(f"prog_{RODADA_ATUAL}")
+            if prog_b64:
                 try:
-                    st.session_state.bloco_index = int(saved_bloco)
-                except ValueError:
-                    pass
-            if saved_resp:
-                try:
-                    # Tenta decodificar o Base64 novo à prova de erros 400
-                    decoded = base64.b64decode(saved_resp).decode('utf-8')
-                    st.session_state.respostas = json.loads(decoded)
+                    prog_data = json.loads(base64.b64decode(prog_b64).decode('utf-8'))
+                    st.session_state.bloco_index = prog_data.get("b", -1)
+                    st.session_state.id_sessao = prog_data.get("s", None)
+                    st.session_state.respostas = prog_data.get("r", {})
                 except Exception:
-                    try:
-                        # Fallback de segurança para histórico antigo do navegador
-                        st.session_state.respostas = json.loads(saved_resp)
-                    except Exception:
-                        pass
-
-            if saved_bloco is not None or saved_sessao is not None or saved_resp is not None:
-                st.session_state.restaurado = True
+                    pass
+            st.session_state.restaurado = True
 
     if not st.session_state.id_sessao:
         st.session_state.id_sessao = f"S_{str(uuid.uuid4())[:8]}"
 
-    if st.session_state.enviado:
+    # 2. TELA DE SUCESSO (Impede visualização de perguntas após o envio)
+    if st.session_state.enviado or st.session_state.tela_sucesso:
         st.balloons()
         st.warning("### ⚠️ Participação já registrada!")
-        st.info("Obrigado! Você já computou as respostas de forma 100% anônima.")
+        st.info("Obrigado! Suas respostas foram enviadas e computadas de forma 100% anônima.")
 
     elif not LISTA_BLOCOS:
-        st.info("Carregando as perguntas... Verifique se o arquivo perguntas.json foi enviado ao GitHub.")
+        st.info("Carregando as perguntas... Verifique se a API do Google Scripts está disponível.")
 
     else:
-        # ---------------- TELA DE BOAS-VINDAS ----------------
+        # 3. TELA DE BOAS-VINDAS
         if st.session_state.bloco_index == -1:
             st.markdown("### Seja bem-vindo(a) à nossa Pesquisa de Clima Organizacional – Ciclo 2026")
             st.write("Esta pesquisa é um espaço para você dizer, com liberdade, como está sendo a sua experiência aqui no Barracuda. Sua opinião é o que orienta decisões estratégicas sobre o que precisa melhorar e o que vale a pena manter.")
-
             st.markdown("#### 🔒 É confidencial")
             st.write("Ninguém vai saber quais foram as suas respostas individuais. Os resultados são analisados de forma consolidada, considerando toda a empresa. Ninguém terá acesso a respostas individuais nem a recortes por área ou equipe.")
-
             st.markdown("#### 🙋 É voluntária")
             st.write("Você decide se quer participar. Mas quanto mais gente responder, mais completo e representativo fica o retrato do nosso clima.")
-
             st.info("⏱️ **Leva poucos minutos.** As perguntas estão organizadas por tema e usam formatos rápidos: escalas de 1 a 5, sim ou não e alguns campos abertos para quem quiser se aprofundar.")
             st.warning("🤝 **Seja honesto(a).** Essa pesquisa só cumpre seu propósito se refletir a realidade, inclusive os pontos difíceis. Toda resposta é bem-vinda, elogio ou crítica.")
             st.success("✅ Depois da aplicação, vamos compartilhar os resultados gerais e o plano de ação. Responder à pesquisa é o primeiro passo para transformar percepção em mudança real. **Contamos com a sua participação!**")
-
             st.markdown("---")
             st.markdown("### Nossa Identidade")
             st.markdown('**🎯 Nossa Missão:** *"Proporcionar estadias transformadoras por meio da sabedoria e hospitalidade genuína dos baianos, e de experiências que promovam conexões autênticas com a natureza e a cultura local, além de contribuir com um legado positivo para Itacaré"*')
             st.markdown("**👁️ Nossa Visão:** *Consolidar-se como um destino único, reconhecido globalmente*")
             st.markdown("**💎 Nossos Valores:**\n- Excelência em hospitalidade\n- Autenticidade\n- Integridade\n- Responsabilidade socioambiental\n- Inovação")
-
             st.markdown("---")
             st.write("")
             st.button("📝 Iniciar Pesquisa", type="primary", use_container_width=True, on_click=callback_iniciar_pesquisa)
 
-        # ---------------- BLOCOS DE PERGUNTAS ----------------
+        # 4. TELA DE PERGUNTAS (BLOCOS)
         else:
             bloco_nome = LISTA_BLOCOS[st.session_state.bloco_index]
 
@@ -310,7 +305,6 @@ with aba_pesquisa:
                         on_change=auto_salvar_resposta,
                         args=(q["id"], bloco_nome, q["texto"], q["tipo"]),
                     )
-
                     if resposta:
                         st.session_state.respostas[q_key] = str(resposta).strip()
                     else:
@@ -343,7 +337,7 @@ with aba_pesquisa:
                         st.caption("⚠️ Responda a todas as questões de múltipla escolha para avançar.")
                 else:
                     if st.button("🚀 Concluir e Enviar", type="primary", disabled=not bloco_completo):
-                        with st.spinner("Concluindo sua participação..."):
+                        with st.spinner("Computando e enviando sua participação..."):
                             payload = {
                                 "acao": "concluir_pesquisa",
                                 "id_sessao": st.session_state.id_sessao,
@@ -351,32 +345,29 @@ with aba_pesquisa:
                             }
                             ok, resposta_api = _chamar_api(payload=payload, method="POST", timeout=10, tentativas=MAX_TENTATIVAS)
 
-                            sucesso = ok and isinstance(resposta_api, str) and "Success" in resposta_api
-                            if sucesso:
+                            if ok and isinstance(resposta_api, str) and "Success" in resposta_api:
+                                concluir_pesquisa_cookies()
+                                # Prepara a UI para a tela de Sucesso na hora
+                                st.session_state.tela_sucesso = True
                                 st.session_state.enviado = True
                                 st.session_state.respostas = {}
                                 st.session_state.bloco_index = -1
                                 st.session_state.id_sessao = None
-                                st.session_state.concluir_pesquisa_agora = True
-                                st.rerun() # Permite o reinício seguro para renderização limpa do sucesso
+                                st.rerun() # Dispara a visualização da tela final
                             else:
                                 st.error("Não foi possível concluir o envio agora. Verifique sua conexão e tente novamente.")
-                    if not bloco_completo:
-                        st.caption("⚠️ Responda a todas as questões de múltipla escolha para liberar o envio.")
 
 # ------------------------------------------------------------------------------
 # ABA 2: CONTROLE DO ADMINISTRADOR
 # ------------------------------------------------------------------------------
 with aba_admin:
     st.markdown("### ⚙️ Painel Administrativo")
-
     agora = time.time()
+    
     if agora < st.session_state.bloqueado_ate:
-        segundos_restantes = int(st.session_state.bloqueado_ate - agora)
-        st.error(f"🔒 Muitas tentativas incorretas. Tente novamente em {segundos_restantes}s.")
+        st.error(f"🔒 Muitas tentativas incorretas. Tente novamente em {int(st.session_state.bloqueado_ate - agora)}s.")
     else:
         senha = st.text_input("Senha Master do RH:", type="password")
-
         senha_correta = bool(senha) and hmac.compare_digest(senha.encode('utf-8'), SENHA_ADMIN.encode('utf-8'))
 
         if senha and not senha_correta:
@@ -393,7 +384,6 @@ with aba_admin:
             st.session_state.tentativas_login = 0
             st.write(f"**Identificador da Pesquisa Atual:** `{RODADA_ATUAL}`")
             st.markdown("---")
-
             st.subheader("📊 Engajamento de Colaboradores")
 
             col_res, col_btn = st.columns([3, 1])
@@ -408,14 +398,12 @@ with aba_admin:
             st.metric("Total de Questionários Respondidos", f"{total_participantes} colaboradores")
 
             if dados_adesao:
-                df_adesao = pd.DataFrame(list(dados_adesao.items()), columns=["Status/Rodada", "Respostas"])
-                df_adesao = df_adesao.set_index("Status/Rodada")
+                df_adesao = pd.DataFrame(list(dados_adesao.items()), columns=["Status/Rodada", "Respostas"]).set_index("Status/Rodada")
                 st.bar_chart(df_adesao)
             else:
                 st.caption("Ainda não há dados de adesão para exibir.")
 
             st.markdown("---")
-
             st.subheader("⚠️ Zona de Perigo")
             st.caption("Ao iniciar um novo ciclo, os navegadores de todos os colaboradores serão desbloqueados automaticamente para responderem à nova rodada.")
 
@@ -428,34 +416,3 @@ with aba_admin:
                     st.rerun()
                 else:
                     st.error("Falha ao executar reset remoto. Verifique a conexão com o Apps Script e tente novamente.")
-
-
-# ==============================================================================
-# MOTOR SILENCIOSO DE COOKIES (Fica no final para evitar qualquer pulo visual)
-# ==============================================================================
-if cookie_manager:
-    if st.session_state.get("concluir_pesquisa_agora"):
-        st.session_state.concluir_pesquisa_agora = False
-        try:
-            now_end = str(time.time())
-            cookie_manager.set(cookie=RODADA_ATUAL, val="respondido", max_age=7776000, key=f"ck_done_{now_end}")
-            cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val="", max_age=0, key=f"ck_del_bl_{now_end}")
-            cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val="", max_age=0, key=f"ck_del_re_{now_end}")
-        except Exception:
-            pass
-
-    elif st.session_state.get("atualizar_progresso_agora") and not st.session_state.enviado:
-        st.session_state.atualizar_progresso_agora = False
-        try:
-            # Base64 Criptografado (Evita o Erro 400 Bad Request)
-            resp_json = json.dumps(st.session_state.respostas)
-            resp_b64 = base64.b64encode(resp_json.encode('utf-8')).decode('utf-8')
-            
-            # Gera chave única estática para o momento, sem poluir a DOM
-            hash_estado = f"{st.session_state.bloco_index}_{len(st.session_state.respostas)}"
-            
-            cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val=str(st.session_state.bloco_index), max_age=7776000, key=f"ck_bl_{hash_estado}")
-            cookie_manager.set(cookie=f"{RODADA_ATUAL}_sessao", val=str(st.session_state.id_sessao), max_age=7776000, key=f"ck_se_{hash_estado}")
-            cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val=resp_b64, max_age=7776000, key=f"ck_re_{hash_estado}")
-        except Exception as e:
-            logger.warning("Falha ao atualizar cookies: %s", e)
