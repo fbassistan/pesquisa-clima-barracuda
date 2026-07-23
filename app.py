@@ -13,12 +13,52 @@ import pandas as pd
 import streamlit as st
 
 # ==============================================================================
-# CONFIGURAÇÃO
+# CONFIGURAÇÃO E IDENTIDADE VISUAL (EDIÇÃO DE CORES E LOGO)
 # ==============================================================================
 st.set_page_config(page_title="Pesquisa de Clima Barracuda", page_icon="🏨", layout="centered")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("pesquisa_clima")
+
+# ➔ ALTERE AQUI O CAMINHO DA SUA LOGO (Pode ser arquivo local ex: "logo.png" ou URL "https://...")
+URL_OU_CAMINHO_LOGO = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRCoWtXmWKvlUcgGnpVEm56JhjQWztWcdAR6Q&s" 
+
+# ➔ ALTERE AQUI OS CÓDIGOS HEXADECIMAIS DAS CORES DA SUA EMPRESA
+COR_PRIMARIA = "#1E3A8A"       # Cor dos botões principais, destaques e barra de progresso
+COR_HOVER_BOTAO = "#1E40AF"    # Cor do botão ao passar o mouse por cima
+COR_DESTAQUE = "#D97706"       # Cor secundária / detalhes
+COR_FUNDO_INFO = "#F0F9FF"     # Fundo leve para caixas informativas
+
+# Injeção de CSS personalizado no Streamlit
+st.markdown(f"""
+    <style>
+    /* Estilização dos Botões Principais */
+    div.stButton > button[kind="primary"] {{
+        background-color: {COR_PRIMARIA} !important;
+        color: #FFFFFF !important;
+        border: none !important;
+        border-radius: 8px !important;
+        font-weight: bold !important;
+        transition: all 0.3s ease !important;
+    }}
+    div.stButton > button[kind="primary"]:hover {{
+        background-color: {COR_HOVER_BOTAO} !important;
+        transform: translateY(-1px) !important;
+    }}
+    
+    /* Cor da Barra de Progresso */
+    div.stProgress > div > div > div > div {{
+        background-color: {COR_PRIMARIA} !important;
+    }}
+    
+    /* Estilização das Abas (Tabs) */
+    button[data-baseweb="tab"][aria-selected="true"] {{
+        border-bottom-color: {COR_PRIMARIA} !important;
+        color: {COR_PRIMARIA} !important;
+        font-weight: bold !important;
+    }}
+    </style>
+""", unsafe_allow_html=True)
 
 # ➔ URL DO GOOGLE SCRIPTS E SENHA MASTER
 URL_WEB_APP = "https://script.google.com/macros/s/AKfycbzvxIXvcisyDL5ljMD8gSwYwKhF_bFdvKtG2M-_D1G7Rv26-TfFd-vYR-zxJ0PNIU-XtA/exec"
@@ -35,10 +75,6 @@ cookie_manager = stx.CookieManager(key="barracuda_cookies_manager")
 # ==============================================================================
 def _chamar_api(acao_query: str = None, payload: dict = None, method: str = "GET",
                 timeout: int = TIMEOUT_PADRAO, tentativas: int = 1):
-    """
-    Faz a chamada HTTP para o Web App do Google Scripts.
-    Retorna (sucesso: bool, dados: dict|str|None).
-    """
     url = f"{URL_WEB_APP}?acao={acao_query}" if acao_query else URL_WEB_APP
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
     headers = {"Content-Type": "application/json"} if data else {}
@@ -72,7 +108,6 @@ def buscar_rodada_ativa() -> str:
 
 
 def _validar_pergunta(p: dict) -> bool:
-    """Garante que a pergunta vinda da nuvem possui formato correto."""
     try:
         int(p.get("id"))
     except (TypeError, ValueError):
@@ -93,7 +128,6 @@ def buscar_perguntas_nuvem() -> list:
             logger.warning("%s pergunta(s) descartada(s) por formato inválido.", len(dados) - len(validas))
         return validas
 
-    # Fallback para arquivo local
     try:
         with open("perguntas.json", "r", encoding="utf-8") as f:
             dados_local = json.load(f)
@@ -114,7 +148,6 @@ def buscar_adesao_nuvem() -> dict:
 RODADA_ATUAL = buscar_rodada_ativa()
 PERGUNTAS_RAW = buscar_perguntas_nuvem()
 
-# Agrupa as perguntas dinâmicas em blocos temáticos
 PERGUNTAS_POR_BLOCO = {}
 for p in PERGUNTAS_RAW:
     bloco = p.get("bloco", "Geral").strip()
@@ -133,7 +166,7 @@ LISTA_BLOCOS = list(PERGUNTAS_POR_BLOCO.keys())
 _padroes = {
     "bloco_index": -1,
     "respostas": {},
-    "respostas_enviadas": {},  # Controle rigoroso contra reenvio duplicado
+    "respostas_enviadas": {},
     "id_sessao": None,
     "enviado": False,
     "restaurado": False,
@@ -149,7 +182,6 @@ for chave, valor in _padroes.items():
 # COOKIES & GERENCIAMENTO DE RESPOSTAS
 # ==============================================================================
 def salvar_progresso_cookie():
-    """Salva o progresso no navegador ao navegar entre páginas."""
     if not cookie_manager or st.session_state.enviado:
         return
     try:
@@ -165,7 +197,6 @@ def salvar_progresso_cookie():
 
 
 def limpar_cookies_progresso():
-    """Bloqueia o navegador pós-envio e limpa os cookies temporários."""
     if not cookie_manager:
         return
     try:
@@ -178,14 +209,12 @@ def limpar_cookies_progresso():
 
 
 def _enviar_resposta_background_sem_retry(payload: dict):
-    """Envia resposta sem retentativas automáticas no POST para evitar duplicidade."""
     ok, _ = _chamar_api(payload=payload, method="POST", timeout=12, tentativas=1)
     if not ok:
         st.session_state.envios_pendentes.append(payload)
 
 
 def reenviar_pendentes():
-    """Reenvia automaticamente respostas que falharam previamente."""
     if not st.session_state.envios_pendentes:
         return
     pendentes = list(st.session_state.envios_pendentes)
@@ -195,7 +224,6 @@ def reenviar_pendentes():
 
 
 def salvar_resposta_se_necessario(q_id: int, bloco: str, texto: str, val_clean: str, assincrono: bool = True):
-    """Função central com trava de deduplicação antes de qualquer chamada de rede."""
     if not val_clean or not str(val_clean).strip():
         return
 
@@ -205,11 +233,9 @@ def salvar_resposta_se_necessario(q_id: int, bloco: str, texto: str, val_clean: 
     if not id_sessao:
         return
 
-    # DEDUPLICAÇÃO GARANTIDA: Se este valor exato já foi enviado/processado, aborta imediatamente
     if st.session_state.respostas_enviadas.get(q_key) == val_clean:
         return
 
-    # Registra no Session State IMEDIATAMENTE (Síncrono) para travar futuras chamadas simultâneas
     st.session_state.respostas_enviadas[q_key] = val_clean
     st.session_state.respostas[q_key] = val_clean
 
@@ -240,7 +266,6 @@ def auto_salvar_resposta(q_id: int, bloco: str, texto: str, tipo: str):
 
 
 def garantir_todas_respostas_salvas():
-    """Varre e garante que qualquer resposta pendente seja transmitida antes do encerramento."""
     for q in PERGUNTAS_RAW:
         q_id = int(q["id"])
         q_key = f"q_{q_id}"
@@ -251,7 +276,6 @@ def garantir_todas_respostas_salvas():
 
 
 def verificar_bloco_completo(blocos_perguntas: list) -> bool:
-    """Verifica se todas as perguntas do bloco atual foram respondidas."""
     for q in blocos_perguntas:
         q_id = int(q["id"])
         ui_key = f"ui_q_{q_id}"
@@ -283,6 +307,15 @@ def callback_avancar_tema():
 # ==============================================================================
 # INTERFACE GRÁFICA (UI)
 # ==============================================================================
+
+# Cabeçalho com Logo Centralizada/Alinhada
+try:
+    col_logo_esq, col_logo_centro, col_logo_dir = st.columns([1, 2, 1])
+    with col_logo_centro:
+        st.image(URL_OU_CAMINHO_LOGO, use_container_width=True)
+except Exception:
+    pass  # Se a logo não existir ou der erro, carrega o app normalmente
+
 st.title("🔒 Pesquisa de Clima Organizacional")
 
 aba_pesquisa, aba_admin = st.tabs(["📝 Responder Pesquisa", "⚙️ Painel de Controle"])
@@ -312,7 +345,6 @@ with aba_pesquisa:
             if saved_resp:
                 try:
                     st.session_state.respostas = json.loads(saved_resp)
-                    # Marca as respostas recuperadas do cookie como enviadas para evitar disparos
                     st.session_state.respostas_enviadas = {
                         k: str(v).strip() for k, v in st.session_state.respostas.items() if v
                     }
