@@ -15,7 +15,7 @@ import streamlit as st
 # ==============================================================================
 # CONFIGURAÇÃO E IDENTIDADE VISUAL
 # ==============================================================================
-st.set_page_config(page_title="Pesquisa de Clima Barracuda", page_icon="🏨", layout="centered")
+st.set_page_config(page_title="Pesquisa de Clima Barracuda", page_icon="", layout="centered")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("pesquisa_clima")
