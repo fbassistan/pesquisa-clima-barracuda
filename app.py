@@ -26,7 +26,7 @@ URL_OU_CAMINHO_LOGO = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRCo
 # ➔ ALTERE AQUI OS CÓDIGOS HEXADECIMAIS DAS CORES DA SUA EMPRESA
 COR_PRIMARIA = "#DEB887"       # Cor dos botões principais, destaques e barra de progresso
 COR_HOVER_BOTAO = "#1E40AF"    # Cor do botão ao passar o mouse por cima
-COR_DESTAQUE = "#D97706"       # Cor secundária / detalhes
+COR_DESTAQUE = "#DEB887"       # Cor secundária / detalhes
 COR_FUNDO_INFO = "#DEB887"     # Fundo leve para caixas informativas
 
 # Injeção de CSS personalizado no Streamlit
