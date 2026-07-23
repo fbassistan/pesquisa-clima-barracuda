@@ -15,7 +15,7 @@ import streamlit as st
 # ==============================================================================
 # CONFIGURAÇÃO E IDENTIDADE VISUAL
 # ==============================================================================
-st.set_page_config(page_title="Pesquisa de Clima Barracuda", page_icon="", layout="centered")
+st.set_page_config(page_title="Pesquisa de Clima Barracuda", page_icon="🏨", layout="centered")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("pesquisa_clima")
@@ -321,7 +321,7 @@ with col_logo:
         pass
 
 with col_titulo:
-    st.title("🔒 Pesquisa de Clima Organizacional")
+    st.title("Pesquisa de Clima Organizacional")
 
 aba_pesquisa, aba_admin = st.tabs(["📝 Responder Pesquisa", "⚙️ Painel de Controle"])
 
