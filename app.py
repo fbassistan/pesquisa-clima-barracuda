@@ -134,6 +134,7 @@ LISTA_BLOCOS = list(PERGUNTAS_POR_BLOCO.keys())
 _padroes = {
     "bloco_index": -1,
     "respostas": {},
+    "respostas_enviadas": {},  # Evita reenvio do mesmo valor para a API
     "id_sessao": None,
     "enviado": False,
     "restaurado": False,
@@ -188,7 +189,7 @@ def reenviar_pendentes():
     """Reenvia automaticamente respostas que falharam previamente."""
     if not st.session_state.envios_pendentes:
         return
-    pendentes = st.session_state.envios_pendentes
+    pendentes = list(st.session_state.envios_pendentes)
     st.session_state.envios_pendentes = []
     for payload in pendentes:
         threading.Thread(target=enviar_resposta_background, args=(payload,), daemon=True).start()
@@ -197,14 +198,23 @@ def reenviar_pendentes():
 def auto_salvar_resposta(q_id: int, bloco: str, texto: str, tipo: str):
     ui_key = f"ui_q_{q_id}"
     valor_raw = st.session_state.get(ui_key)
-    if valor_raw is None or valor_raw == "":
+    if valor_raw is None or str(valor_raw).strip() == "":
         return
 
     val_clean = str(valor_raw).strip()
-    st.session_state.respostas[f"q_{q_id}"] = val_clean
+    q_key = f"q_{q_id}"
+    st.session_state.respostas[q_key] = val_clean
+
+    # DEDUPLICAÇÃO: Se este valor exato já foi enviado para esta pergunta, ignora
+    if st.session_state.respostas_enviadas.get(q_key) == val_clean:
+        return
+
     id_sessao = st.session_state.get("id_sessao")
     if not id_sessao:
         return
+
+    # Registra como enviada antes da requisição para impedir disparos duplicados paralelos
+    st.session_state.respostas_enviadas[q_key] = val_clean
 
     payload = {
         "acao": "salvar_resposta_avulsa",
@@ -219,6 +229,31 @@ def auto_salvar_resposta(q_id: int, bloco: str, texto: str, tipo: str):
     }
     reenviar_pendentes()
     threading.Thread(target=enviar_resposta_background, args=(payload,), daemon=True).start()
+
+
+def garantir_todas_respostas_salvas():
+    """Varre e garante que qualquer resposta não enviada seja transmitida antes de encerrar."""
+    for q in PERGUNTAS_RAW:
+        q_id = int(q["id"])
+        q_key = f"q_{q_id}"
+        val = st.session_state.respostas.get(q_key)
+        if val and str(val).strip():
+            val_clean = str(val).strip()
+            if st.session_state.respostas_enviadas.get(q_key) != val_clean:
+                st.session_state.respostas_enviadas[q_key] = val_clean
+                bloco_nome = q.get("bloco", "Geral").strip()
+                payload = {
+                    "acao": "salvar_resposta_avulsa",
+                    "id_sessao": st.session_state.id_sessao,
+                    "data_hora": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                    "rodada": RODADA_ATUAL,
+                    "bloco": bloco_nome,
+                    "id_pergunta": q_id,
+                    "enunciado": q.get("texto", "").strip(),
+                    "resposta": val_clean,
+                    "setor": "Geral",
+                }
+                _chamar_api(payload=payload, method="POST", timeout=8, tentativas=2)
 
 
 # ==============================================================================
@@ -271,6 +306,10 @@ with aba_pesquisa:
             if saved_resp:
                 try:
                     st.session_state.respostas = json.loads(saved_resp)
+                    # Marca as respostas recuperadas do cookie para evitar disparos na API
+                    st.session_state.respostas_enviadas = {
+                        k: str(v).strip() for k, v in st.session_state.respostas.items() if v
+                    }
                 except Exception:
                     pass
 
@@ -338,8 +377,8 @@ with aba_pesquisa:
                     options = [str(opt).strip() for opt in q["opcoes"]]
                     saved_val = st.session_state.respostas.get(q_key)
 
-                    # Força a pré-seleção da resposta previamente gravada
-                    if saved_val and str(saved_val).strip() in options:
+                    # Atribuição segura apenas se o widget ainda não foi inicializado
+                    if saved_val and str(saved_val).strip() in options and ui_key not in st.session_state:
                         st.session_state[ui_key] = str(saved_val).strip()
 
                     idx_default = options.index(st.session_state[ui_key]) if ui_key in st.session_state and st.session_state[ui_key] in options else None
@@ -366,7 +405,13 @@ with aba_pesquisa:
                         on_change=auto_salvar_resposta,
                         args=(q["id"], bloco_nome, q["texto"], q["tipo"]),
                     )
-                    st.session_state.respostas[q_key] = resposta_texto
+
+                    # OBRIGATORIEDADE ABERTAS: Verifica se não está vazio
+                    if resposta_texto and resposta_texto.strip():
+                        st.session_state.respostas[q_key] = resposta_texto.strip()
+                    else:
+                        bloco_completo = False
+                        st.session_state.respostas[q_key] = ""
 
                 st.write("")
 
@@ -380,10 +425,11 @@ with aba_pesquisa:
                 if st.session_state.bloco_index < len(LISTA_BLOCOS) - 1:
                     st.button("Avançar Tema ➡️", type="primary", disabled=not bloco_completo, on_click=callback_avancar_tema)
                     if not bloco_completo:
-                        st.caption("⚠️ Responda a todas as questões de múltipla escolha para avançar.")
+                        st.caption("⚠️ Responda a todas as perguntas do bloco (incluindo as abertas) para avançar.")
                 else:
                     if st.button("🚀 Concluir e Enviar", type="primary", disabled=not bloco_completo):
                         with st.spinner("Concluindo sua participação..."):
+                            garantir_todas_respostas_salvas()
                             payload = {
                                 "acao": "concluir_pesquisa",
                                 "id_sessao": st.session_state.id_sessao,
@@ -396,6 +442,7 @@ with aba_pesquisa:
                                 limpar_cookies_progresso()
                                 st.session_state.enviado = True
                                 st.session_state.respostas = {}
+                                st.session_state.respostas_enviadas = {}
                                 st.session_state.bloco_index = -1
                                 st.session_state.id_sessao = None
 
@@ -407,7 +454,7 @@ with aba_pesquisa:
                             else:
                                 st.error("Não foi possível concluir o envio agora. Verifique sua conexão e tente novamente — suas respostas continuam salvas.")
                     if not bloco_completo:
-                        st.caption("⚠️ Responda a todas as questões de múltipla escolha para liberar o envio.")
+                        st.caption("⚠️ Responda a todas as perguntas do bloco (incluindo as abertas) para liberar o envio.")
 
 # ------------------------------------------------------------------------------
 # ABA 2: CONTROLE DO ADMINISTRADOR
