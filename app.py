@@ -24,8 +24,7 @@ logger = logging.getLogger("pesquisa_clima")
 URL_WEB_APP = "https://script.google.com/macros/s/AKfycbzvxIXvcisyDL5ljMD8gSwYwKhF_bFdvKtG2M-_D1G7Rv26-TfFd-vYR-zxJ0PNIU-XtA/exec"
 SENHA_ADMIN = "RH2026"
 
-TIMEOUT_PADRAO = 8
-MAX_TENTATIVAS = 3
+TIMEOUT_PADRAO = 12
 MAX_TENTATIVAS_LOGIN = 5
 BLOQUEIO_LOGIN_SEGUNDOS = 60
 
@@ -134,7 +133,7 @@ LISTA_BLOCOS = list(PERGUNTAS_POR_BLOCO.keys())
 _padroes = {
     "bloco_index": -1,
     "respostas": {},
-    "respostas_enviadas": {},  # Evita reenvio do mesmo valor para a API
+    "respostas_enviadas": {},  # Controle rigoroso contra reenvio duplicado
     "id_sessao": None,
     "enviado": False,
     "restaurado": False,
@@ -178,9 +177,9 @@ def limpar_cookies_progresso():
         logger.warning("Falha ao limpar cookies: %s", e)
 
 
-def enviar_resposta_background(payload: dict):
-    """Envia uma resposta avulsa em segundo plano sem travar a interface."""
-    ok, _ = _chamar_api(payload=payload, method="POST", tentativas=MAX_TENTATIVAS)
+def _enviar_resposta_background_sem_retry(payload: dict):
+    """Envia resposta sem retentativas automáticas no POST para evitar duplicidade."""
+    ok, _ = _chamar_api(payload=payload, method="POST", timeout=12, tentativas=1)
     if not ok:
         st.session_state.envios_pendentes.append(payload)
 
@@ -192,29 +191,27 @@ def reenviar_pendentes():
     pendentes = list(st.session_state.envios_pendentes)
     st.session_state.envios_pendentes = []
     for payload in pendentes:
-        threading.Thread(target=enviar_resposta_background, args=(payload,), daemon=True).start()
+        threading.Thread(target=_enviar_resposta_background_sem_retry, args=(payload,), daemon=True).start()
 
 
-def auto_salvar_resposta(q_id: int, bloco: str, texto: str, tipo: str):
-    ui_key = f"ui_q_{q_id}"
-    valor_raw = st.session_state.get(ui_key)
-    if valor_raw is None or str(valor_raw).strip() == "":
+def salvar_resposta_se_necessario(q_id: int, bloco: str, texto: str, val_clean: str, assincrono: bool = True):
+    """Função central com trava de deduplicação antes de qualquer chamada de rede."""
+    if not val_clean or not str(val_clean).strip():
         return
 
-    val_clean = str(valor_raw).strip()
+    val_clean = str(val_clean).strip()
     q_key = f"q_{q_id}"
-    st.session_state.respostas[q_key] = val_clean
-
-    # DEDUPLICAÇÃO: Se este valor exato já foi enviado para esta pergunta, ignora
-    if st.session_state.respostas_enviadas.get(q_key) == val_clean:
-        return
-
     id_sessao = st.session_state.get("id_sessao")
     if not id_sessao:
         return
 
-    # Registra como enviada antes da requisição para impedir disparos duplicados paralelos
+    # DEDUPLICAÇÃO GARANTIDA: Se este valor exato já foi enviado/processado, aborta imediatamente
+    if st.session_state.respostas_enviadas.get(q_key) == val_clean:
+        return
+
+    # Registra no Session State IMEDIATAMENTE (Síncrono) para travar futuras chamadas simultâneas
     st.session_state.respostas_enviadas[q_key] = val_clean
+    st.session_state.respostas[q_key] = val_clean
 
     payload = {
         "acao": "salvar_resposta_avulsa",
@@ -227,33 +224,42 @@ def auto_salvar_resposta(q_id: int, bloco: str, texto: str, tipo: str):
         "resposta": val_clean,
         "setor": "Geral",
     }
-    reenviar_pendentes()
-    threading.Thread(target=enviar_resposta_background, args=(payload,), daemon=True).start()
+
+    if assincrono:
+        reenviar_pendentes()
+        threading.Thread(target=_enviar_resposta_background_sem_retry, args=(payload,), daemon=True).start()
+    else:
+        _chamar_api(payload=payload, method="POST", timeout=12, tentativas=1)
+
+
+def auto_salvar_resposta(q_id: int, bloco: str, texto: str, tipo: str):
+    ui_key = f"ui_q_{q_id}"
+    valor_raw = st.session_state.get(ui_key)
+    if valor_raw is not None and str(valor_raw).strip() != "":
+        salvar_resposta_se_necessario(q_id, bloco, texto, str(valor_raw).strip(), assincrono=True)
 
 
 def garantir_todas_respostas_salvas():
-    """Varre e garante que qualquer resposta não enviada seja transmitida antes de encerrar."""
+    """Varre e garante que qualquer resposta pendente seja transmitida antes do encerramento."""
     for q in PERGUNTAS_RAW:
         q_id = int(q["id"])
         q_key = f"q_{q_id}"
         val = st.session_state.respostas.get(q_key)
         if val and str(val).strip():
-            val_clean = str(val).strip()
-            if st.session_state.respostas_enviadas.get(q_key) != val_clean:
-                st.session_state.respostas_enviadas[q_key] = val_clean
-                bloco_nome = q.get("bloco", "Geral").strip()
-                payload = {
-                    "acao": "salvar_resposta_avulsa",
-                    "id_sessao": st.session_state.id_sessao,
-                    "data_hora": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                    "rodada": RODADA_ATUAL,
-                    "bloco": bloco_nome,
-                    "id_pergunta": q_id,
-                    "enunciado": q.get("texto", "").strip(),
-                    "resposta": val_clean,
-                    "setor": "Geral",
-                }
-                _chamar_api(payload=payload, method="POST", timeout=8, tentativas=2)
+            bloco_nome = q.get("bloco", "Geral").strip()
+            salvar_resposta_se_necessario(q_id, bloco_nome, q.get("texto", "").strip(), str(val).strip(), assincrono=False)
+
+
+def verificar_bloco_completo(blocos_perguntas: list) -> bool:
+    """Verifica se todas as perguntas do bloco atual foram respondidas."""
+    for q in blocos_perguntas:
+        q_id = int(q["id"])
+        ui_key = f"ui_q_{q_id}"
+        q_key = f"q_{q_id}"
+        val = st.session_state.get(ui_key) or st.session_state.respostas.get(q_key, "")
+        if not val or not str(val).strip():
+            return False
+    return True
 
 
 # ==============================================================================
@@ -306,7 +312,7 @@ with aba_pesquisa:
             if saved_resp:
                 try:
                     st.session_state.respostas = json.loads(saved_resp)
-                    # Marca as respostas recuperadas do cookie para evitar disparos na API
+                    # Marca as respostas recuperadas do cookie como enviadas para evitar disparos
                     st.session_state.respostas_enviadas = {
                         k: str(v).strip() for k, v in st.session_state.respostas.items() if v
                     }
@@ -366,18 +372,17 @@ with aba_pesquisa:
             st.markdown("---")
 
             perguntas_atuais = PERGUNTAS_POR_BLOCO[bloco_nome]
-            bloco_completo = True
 
             for q in perguntas_atuais:
-                q_key = f"q_{q['id']}"
-                ui_key = f"ui_q_{q['id']}"
+                q_id = int(q["id"])
+                q_key = f"q_{q_id}"
+                ui_key = f"ui_q_{q_id}"
                 st.markdown(f"**{q['texto']}**")
 
                 if q["tipo"] == "radio":
                     options = [str(opt).strip() for opt in q["opcoes"]]
                     saved_val = st.session_state.respostas.get(q_key)
 
-                    # Atribuição segura apenas se o widget ainda não foi inicializado
                     if saved_val and str(saved_val).strip() in options and ui_key not in st.session_state:
                         st.session_state[ui_key] = str(saved_val).strip()
 
@@ -387,13 +392,11 @@ with aba_pesquisa:
                         label=q["texto"], label_visibility="collapsed",
                         options=options, index=idx_default, key=ui_key,
                         on_change=auto_salvar_resposta,
-                        args=(q["id"], bloco_nome, q["texto"], q["tipo"]),
+                        args=(q_id, bloco_nome, q["texto"], q["tipo"]),
                     )
 
                     if resposta:
                         st.session_state.respostas[q_key] = str(resposta).strip()
-                    else:
-                        bloco_completo = False
 
                 elif q["tipo"] == "aberta":
                     saved_val = str(st.session_state.respostas.get(q_key, ""))
@@ -403,14 +406,12 @@ with aba_pesquisa:
                     resposta_texto = st.text_area(
                         label=q["texto"], label_visibility="collapsed", key=ui_key,
                         on_change=auto_salvar_resposta,
-                        args=(q["id"], bloco_nome, q["texto"], q["tipo"]),
+                        args=(q_id, bloco_nome, q["texto"], q["tipo"]),
                     )
 
-                    # OBRIGATORIEDADE ABERTAS: Verifica se não está vazio
                     if resposta_texto and resposta_texto.strip():
                         st.session_state.respostas[q_key] = resposta_texto.strip()
                     else:
-                        bloco_completo = False
                         st.session_state.respostas[q_key] = ""
 
                 st.write("")
@@ -422,39 +423,45 @@ with aba_pesquisa:
                 st.button("⬅️ Voltar Tema", on_click=callback_voltar_tema)
 
             with col_prox:
+                bloco_pronto = verificar_bloco_completo(perguntas_atuais)
+
                 if st.session_state.bloco_index < len(LISTA_BLOCOS) - 1:
-                    st.button("Avançar Tema ➡️", type="primary", disabled=not bloco_completo, on_click=callback_avancar_tema)
-                    if not bloco_completo:
-                        st.caption("⚠️ Responda a todas as perguntas do bloco (incluindo as abertas) para avançar.")
+                    if st.button("Avançar Tema ➡️", type="primary"):
+                        if bloco_pronto:
+                            callback_avancar_tema()
+                            st.rerun()
+                        else:
+                            st.warning("⚠️ Responda a todas as perguntas deste bloco (incluindo o campo de texto) para avançar.")
                 else:
-                    if st.button("🚀 Concluir e Enviar", type="primary", disabled=not bloco_completo):
-                        with st.spinner("Concluindo sua participação..."):
-                            garantir_todas_respostas_salvas()
-                            payload = {
-                                "acao": "concluir_pesquisa",
-                                "id_sessao": st.session_state.id_sessao,
-                                "rodada": RODADA_ATUAL,
-                            }
-                            ok, resposta_api = _chamar_api(payload=payload, method="POST", timeout=10, tentativas=MAX_TENTATIVAS)
+                    if st.button("🚀 Concluir e Enviar", type="primary"):
+                        if bloco_pronto:
+                            with st.spinner("Concluindo sua participação..."):
+                                garantir_todas_respostas_salvas()
+                                payload = {
+                                    "acao": "concluir_pesquisa",
+                                    "id_sessao": st.session_state.id_sessao,
+                                    "rodada": RODADA_ATUAL,
+                                }
+                                ok, resposta_api = _chamar_api(payload=payload, method="POST", timeout=12, tentativas=1)
 
-                            sucesso = ok and isinstance(resposta_api, str) and "Success" in resposta_api
-                            if sucesso:
-                                limpar_cookies_progresso()
-                                st.session_state.enviado = True
-                                st.session_state.respostas = {}
-                                st.session_state.respostas_enviadas = {}
-                                st.session_state.bloco_index = -1
-                                st.session_state.id_sessao = None
+                                sucesso = ok and isinstance(resposta_api, str) and "Success" in resposta_api
+                                if sucesso:
+                                    limpar_cookies_progresso()
+                                    st.session_state.enviado = True
+                                    st.session_state.respostas = {}
+                                    st.session_state.respostas_enviadas = {}
+                                    st.session_state.bloco_index = -1
+                                    st.session_state.id_sessao = None
 
-                                st.balloons()
-                                st.success("### 🎉 Respostas enviadas com sucesso!")
-                                st.info("Obrigado! Sua participação foi registrada de forma 100% anônima.")
-                                time.sleep(1.5)
-                                st.rerun()
-                            else:
-                                st.error("Não foi possível concluir o envio agora. Verifique sua conexão e tente novamente — suas respostas continuam salvas.")
-                    if not bloco_completo:
-                        st.caption("⚠️ Responda a todas as perguntas do bloco (incluindo as abertas) para liberar o envio.")
+                                    st.balloons()
+                                    st.success("### 🎉 Respostas enviadas com sucesso!")
+                                    st.info("Obrigado! Sua participação foi registrada de forma 100% anônima.")
+                                    time.sleep(1.5)
+                                    st.rerun()
+                                else:
+                                    st.error("Não foi possível concluir o envio agora. Verifique sua conexão e tente novamente — suas respostas continuam salvas.")
+                        else:
+                            st.warning("⚠️ Responda a todas as perguntas deste bloco (incluindo o campo de texto) para concluir.")
 
 # ------------------------------------------------------------------------------
 # ABA 2: CONTROLE DO ADMINISTRADOR
@@ -513,7 +520,7 @@ with aba_admin:
 
             confirmar_reset = st.checkbox("Confirmo que quero iniciar um novo ciclo (esta ação não pode ser desfeita).")
             if st.button("🔄 Iniciar Novo Ciclo de Pesquisa", type="primary", use_container_width=True, disabled=not confirmar_reset):
-                ok, resposta_api = _chamar_api(payload={"acao": "virar_rodada_pesquisa"}, method="POST", tentativas=MAX_TENTATIVAS)
+                ok, resposta_api = _chamar_api(payload={"acao": "virar_rodada_pesquisa"}, method="POST", tentativas=1)
                 if ok and isinstance(resposta_api, str) and "Success" in resposta_api:
                     st.success("O identificador mudou na nuvem! Nova pesquisa iniciada com sucesso.")
                     st.cache_data.clear()
