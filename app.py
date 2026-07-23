@@ -27,7 +27,7 @@ URL_OU_CAMINHO_LOGO = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRCo
 COR_PRIMARIA = "#1E3A8A"       # Cor dos botões principais, destaques e barra de progresso
 COR_HOVER_BOTAO = "#1E40AF"    # Cor do botão ao passar o mouse por cima
 COR_DESTAQUE = "#D97706"       # Cor secundária / detalhes
-COR_FUNDO_INFO = "#F0F9FF"     # Fundo leve para caixas informativas
+COR_FUNDO_INFO = "#DEB887"     # Fundo leve para caixas informativas
 
 # Injeção de CSS personalizado no Streamlit
 st.markdown(f"""
