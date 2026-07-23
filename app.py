@@ -1,12 +1,10 @@
-import base64
 import hmac
 import json
 import logging
-import queue
 import threading
 import time
-import urllib.error
 import urllib.request
+import urllib.error
 import uuid
 from datetime import datetime
 
@@ -22,8 +20,8 @@ st.set_page_config(page_title="Pesquisa de Clima Barracuda", page_icon="🏨", l
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("pesquisa_clima")
 
-# ➔ URL DO GOOGLE SCRIPTS (Corrigida sem o 'z' extra) E SENHA MASTER
-URL_WEB_APP = "https://script.google.com/macros/s/AKfycbvxIXvcisyDL5ljMD8gSwYwKhF_bFdvKtG2M-_D1G7Rv26-TfFd-vYR-zxJ0PNIU-XtA/exec"
+# ➔ URL DO GOOGLE SCRIPTS E SENHA MASTER
+URL_WEB_APP = "https://script.google.com/macros/s/AKfycbzvxIXvcisyDL5ljMD8gSwYwKhF_bFdvKtG2M-_D1G7Rv26-TfFd-vYR-zxJ0PNIU-XtA/exec"
 SENHA_ADMIN = "RH2026"
 
 TIMEOUT_PADRAO = 8
@@ -32,9 +30,6 @@ MAX_TENTATIVAS_LOGIN = 5
 BLOQUEIO_LOGIN_SEGUNDOS = 60
 
 cookie_manager = stx.CookieManager(key="barracuda_cookies_manager")
-
-# Fila global Thread-Safe para respostas pendentes em background
-FILA_ENVIOS_PENDENTES = queue.Queue()
 
 # ==============================================================================
 # CLIENTE DE API — Comunicação com Google Apps Script
@@ -144,56 +139,65 @@ _padroes = {
     "restaurado": False,
     "tentativas_login": 0,
     "bloqueado_ate": 0.0,
-    "tela_sucesso": False,
+    "envios_pendentes": [],
 }
 for chave, valor in _padroes.items():
     if chave not in st.session_state:
         st.session_state[chave] = valor
 
 # ==============================================================================
-# COOKIES & GERENCIAMENTO DE RESPOSTAS COMPACTADO
+# COOKIES & GERENCIAMENTO DE RESPOSTAS
 # ==============================================================================
 def salvar_progresso_cookie():
-    """Salva todo o progresso em um único cookie compactado, evitando o Erro 400."""
+    """Salva o progresso no navegador ao navegar entre páginas."""
     if not cookie_manager or st.session_state.enviado:
         return
     try:
-        pacote = {
-            "b": st.session_state.bloco_index,
-            "s": st.session_state.id_sessao,
-            "r": st.session_state.respostas
-        }
-        pacote_b64 = base64.b64encode(json.dumps(pacote).encode('utf-8')).decode('utf-8')
-        cookie_manager.set(cookie=f"prog_{RODADA_ATUAL}", val=pacote_b64, max_age=7776000, key="ck_progresso_fixo")
+        now_ts = str(time.time())
+        cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val=str(st.session_state.bloco_index),
+                           max_age=7776000, key=f"ck_bl_{now_ts}")
+        cookie_manager.set(cookie=f"{RODADA_ATUAL}_sessao", val=str(st.session_state.id_sessao),
+                           max_age=7776000, key=f"ck_se_{now_ts}")
+        cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val=json.dumps(st.session_state.respostas),
+                           max_age=7776000, key=f"ck_re_{now_ts}")
     except Exception as e:
         logger.warning("Falha ao salvar cookies de progresso: %s", e)
 
 
-def concluir_pesquisa_cookies():
-    """Bloqueia o navegador pós-envio e limpa o progresso temporário."""
-    if cookie_manager:
-        cookie_manager.set(cookie=f"done_{RODADA_ATUAL}", val="true", max_age=7776000, key="ck_done_fixo")
-        cookie_manager.set(cookie=f"prog_{RODADA_ATUAL}", val="", max_age=0, key="ck_progresso_fixo")
+def limpar_cookies_progresso():
+    """Bloqueia o navegador pós-envio e limpa os cookies temporários."""
+    if not cookie_manager:
+        return
+    try:
+        now_end = str(time.time())
+        cookie_manager.set(cookie=RODADA_ATUAL, val="respondido", max_age=7776000, key=f"ck_done_{now_end}")
+        cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val="", max_age=0, key=f"ck_del_bl_{now_end}")
+        cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val="", max_age=0, key=f"ck_del_re_{now_end}")
+    except Exception as e:
+        logger.warning("Falha ao limpar cookies: %s", e)
 
 
 def enviar_resposta_background(payload: dict):
     """Envia uma resposta avulsa em segundo plano sem travar a interface."""
     ok, _ = _chamar_api(payload=payload, method="POST", tentativas=MAX_TENTATIVAS)
     if not ok:
-        FILA_ENVIOS_PENDENTES.put(payload)
+        st.session_state.envios_pendentes.append(payload)
 
 
 def reenviar_pendentes():
     """Reenvia automaticamente respostas que falharam previamente."""
-    while not FILA_ENVIOS_PENDENTES.empty():
-        payload = FILA_ENVIOS_PENDENTES.get()
+    if not st.session_state.envios_pendentes:
+        return
+    pendentes = st.session_state.envios_pendentes
+    st.session_state.envios_pendentes = []
+    for payload in pendentes:
         threading.Thread(target=enviar_resposta_background, args=(payload,), daemon=True).start()
 
 
 def auto_salvar_resposta(q_id: int, bloco: str, texto: str, tipo: str):
     ui_key = f"ui_q_{q_id}"
     valor_raw = st.session_state.get(ui_key)
-    if valor_raw is None or str(valor_raw).strip() == "":
+    if valor_raw is None or valor_raw == "":
         return
 
     val_clean = str(valor_raw).strip()
@@ -215,7 +219,6 @@ def auto_salvar_resposta(q_id: int, bloco: str, texto: str, tipo: str):
     }
     reenviar_pendentes()
     threading.Thread(target=enviar_resposta_background, args=(payload,), daemon=True).start()
-    salvar_progresso_cookie()
 
 
 # ==============================================================================
@@ -250,25 +253,34 @@ with aba_pesquisa:
     all_cookies = cookie_manager.get_all() if cookie_manager else {}
 
     if not st.session_state.restaurado and all_cookies:
-        if all_cookies.get(f"done_{RODADA_ATUAL}") == "true" or all_cookies.get(RODADA_ATUAL) == "respondido":
+        if all_cookies.get(RODADA_ATUAL) == "respondido":
             st.session_state.enviado = True
             st.session_state.restaurado = True
         else:
-            prog_b64 = all_cookies.get(f"prog_{RODADA_ATUAL}")
-            if prog_b64:
+            saved_bloco = all_cookies.get(f"{RODADA_ATUAL}_bloco")
+            saved_sessao = all_cookies.get(f"{RODADA_ATUAL}_sessao")
+            saved_resp = all_cookies.get(f"{RODADA_ATUAL}_respostas")
+
+            if saved_sessao:
+                st.session_state.id_sessao = saved_sessao
+            if saved_bloco is not None:
                 try:
-                    prog_data = json.loads(base64.b64decode(prog_b64).decode('utf-8'))
-                    st.session_state.bloco_index = prog_data.get("b", -1)
-                    st.session_state.id_sessao = prog_data.get("s", None)
-                    st.session_state.respostas = prog_data.get("r", {})
+                    st.session_state.bloco_index = int(saved_bloco)
+                except ValueError:
+                    pass
+            if saved_resp:
+                try:
+                    st.session_state.respostas = json.loads(saved_resp)
                 except Exception:
                     pass
-            st.session_state.restaurado = True
+
+            if saved_bloco is not None or saved_sessao is not None or saved_resp is not None:
+                st.session_state.restaurado = True
 
     if not st.session_state.id_sessao:
         st.session_state.id_sessao = f"S_{str(uuid.uuid4())[:8]}"
 
-    if st.session_state.enviado or st.session_state.tela_sucesso:
+    if st.session_state.enviado:
         st.balloons()
         st.warning("### ⚠️ Participação já registrada!")
         st.info("Obrigado! Você já computou as respostas de forma 100% anônima.")
@@ -326,6 +338,7 @@ with aba_pesquisa:
                     options = [str(opt).strip() for opt in q["opcoes"]]
                     saved_val = st.session_state.respostas.get(q_key)
 
+                    # Força a pré-seleção da resposta previamente gravada
                     if saved_val and str(saved_val).strip() in options:
                         st.session_state[ui_key] = str(saved_val).strip()
 
@@ -380,15 +393,19 @@ with aba_pesquisa:
 
                             sucesso = ok and isinstance(resposta_api, str) and "Success" in resposta_api
                             if sucesso:
-                                concluir_pesquisa_cookies()
-                                st.session_state.tela_sucesso = True
+                                limpar_cookies_progresso()
                                 st.session_state.enviado = True
                                 st.session_state.respostas = {}
                                 st.session_state.bloco_index = -1
                                 st.session_state.id_sessao = None
+
+                                st.balloons()
+                                st.success("### 🎉 Respostas enviadas com sucesso!")
+                                st.info("Obrigado! Sua participação foi registrada de forma 100% anônima.")
+                                time.sleep(1.5)
                                 st.rerun()
                             else:
-                                st.error("Não foi possível concluir o envio agora. Verifique sua conexão e tente novamente.")
+                                st.error("Não foi possível concluir o envio agora. Verifique sua conexão e tente novamente — suas respostas continuam salvas.")
                     if not bloco_completo:
                         st.caption("⚠️ Responda a todas as questões de múltipla escolha para liberar o envio.")
 
@@ -405,7 +422,7 @@ with aba_admin:
     else:
         senha = st.text_input("Senha Master do RH:", type="password")
 
-        senha_correta = bool(senha) and hmac.compare_digest(senha.encode('utf-8'), SENHA_ADMIN.encode('utf-8'))
+        senha_correta = bool(senha) and hmac.compare_digest(senha, SENHA_ADMIN)
 
         if senha and not senha_correta:
             st.session_state.tentativas_login += 1
