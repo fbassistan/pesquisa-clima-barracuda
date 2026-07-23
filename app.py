@@ -13,25 +13,29 @@ import pandas as pd
 import streamlit as st
 
 # ==============================================================================
-# CONFIGURAÇÃO E IDENTIDADE VISUAL (EDIÇÃO DE CORES E LOGO)
+# CONFIGURAÇÃO E IDENTIDADE VISUAL
 # ==============================================================================
 st.set_page_config(page_title="Pesquisa de Clima Barracuda", page_icon="🏨", layout="centered")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("pesquisa_clima")
 
-# ➔ ALTERE AQUI O CAMINHO DA SUA LOGO (Pode ser arquivo local ex: "logo.png" ou URL "https://...")
+# ➔ LINK DA SUA LOGO
 URL_OU_CAMINHO_LOGO = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRCoWtXmWKvlUcgGnpVEm56JhjQWztWcdAR6Q&s" 
 
-# ➔ ALTERE AQUI OS CÓDIGOS HEXADECIMAIS DAS CORES DA SUA EMPRESA
-COR_PRIMARIA = "#DEB887"       # Cor dos botões principais, destaques e barra de progresso
-COR_HOVER_BOTAO = "#1E40AF"    # Cor do botão ao passar o mouse por cima
-COR_DESTAQUE = "#DEB887"       # Cor secundária / detalhes
-COR_FUNDO_INFO = "#DEB887"     # Fundo leve para caixas informativas
+# ➔ PALETA DE CORES DA EMPRESA
+COR_FUNDO = "#DEB887"          # Cor de Fundo da Aplicação
+COR_PRIMARIA = "#5C3A21"       # Cor escura para Botões e Destaques (alta legibilidade sobre o fundo)
+COR_HOVER_BOTAO = "#3D2615"    # Cor ao passar o mouse por cima do botão
 
 # Injeção de CSS personalizado no Streamlit
 st.markdown(f"""
     <style>
+    /* Cor de Fundo de toda a página */
+    .stApp {{
+        background-color: {COR_FUNDO} !important;
+    }}
+    
     /* Estilização dos Botões Principais */
     div.stButton > button[kind="primary"] {{
         background-color: {COR_PRIMARIA} !important;
@@ -308,15 +312,16 @@ def callback_avancar_tema():
 # INTERFACE GRÁFICA (UI)
 # ==============================================================================
 
-# Cabeçalho com Logo Centralizada/Alinhada
-try:
-    col_logo_esq, col_logo_centro, col_logo_dir = st.columns([1, 2, 1])
-    with col_logo_centro:
-        st.image(URL_OU_CAMINHO_LOGO, use_container_width=True)
-except Exception:
-    pass  # Se a logo não existir ou der erro, carrega o app normalmente
+# Cabeçalho com Logo Pequena na Lateral Esquerda ao Lado do Título
+col_logo, col_titulo = st.columns([1, 5])
+with col_logo:
+    try:
+        st.image(URL_OU_CAMINHO_LOGO, width=80)
+    except Exception:
+        pass
 
-st.title("🔒 Pesquisa de Clima Organizacional")
+with col_titulo:
+    st.title("🔒 Pesquisa de Clima Organizacional")
 
 aba_pesquisa, aba_admin = st.tabs(["📝 Responder Pesquisa", "⚙️ Painel de Controle"])
 
