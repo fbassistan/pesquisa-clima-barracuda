@@ -6,6 +6,7 @@ import time
 import urllib.request
 import urllib.error
 import uuid
+import queue
 from datetime import datetime
 
 import extra_streamlit_components as stx
@@ -31,13 +32,16 @@ BLOQUEIO_LOGIN_SEGUNDOS = 60
 
 cookie_manager = stx.CookieManager(key="barracuda_cookies_manager")
 
+# Fila global e Thread-Safe para respostas pendentes (Não usar session_state aqui)
+FILA_ENVIOS_PENDENTES = queue.Queue()
+
 # ==============================================================================
 # CLIENTE DE API — Comunicação com Google Apps Script
 # ==============================================================================
 def _chamar_api(acao_query: str = None, payload: dict = None, method: str = "GET",
                 timeout: int = TIMEOUT_PADRAO, tentativas: int = 1):
     """
-    Faz a chamada HTTP para o Web App do Google Scripts.
+    Faz a chamada HTTP para o Web App do Google Scripts com Retry e Backoff.
     Retorna (sucesso: bool, dados: dict|str|None).
     """
     url = f"{URL_WEB_APP}?acao={acao_query}" if acao_query else URL_WEB_APP
@@ -63,14 +67,12 @@ def _chamar_api(acao_query: str = None, payload: dict = None, method: str = "GET
     logger.error("Chamada '%s' falhou definitivamente: %s", acao_query or "POST", ultimo_erro)
     return False, None
 
-
 @st.cache_data(ttl=30)
 def buscar_rodada_ativa() -> str:
     ok, dados = _chamar_api(acao_query="buscar_rodada", tentativas=2)
     if ok and isinstance(dados, dict):
         return dados.get("rodada_atual", "pesquisa_v1")
     return "pesquisa_fallback"
-
 
 def _validar_pergunta(p: dict) -> bool:
     """Garante que a pergunta vinda da nuvem possui formato correto."""
@@ -84,7 +86,6 @@ def _validar_pergunta(p: dict) -> bool:
         return False
     return True
 
-
 @st.cache_data(ttl=300)
 def buscar_perguntas_nuvem() -> list:
     ok, dados = _chamar_api(acao_query="buscar_perguntas", timeout=10, tentativas=2)
@@ -94,7 +95,7 @@ def buscar_perguntas_nuvem() -> list:
             logger.warning("%s pergunta(s) descartada(s) por formato inválido.", len(dados) - len(validas))
         return validas
 
-    # Fallback para arquivo local
+    # Fallback para arquivo local se estiver sem internet no carregamento inicial
     try:
         with open("perguntas.json", "r", encoding="utf-8") as f:
             dados_local = json.load(f)
@@ -103,14 +104,12 @@ def buscar_perguntas_nuvem() -> list:
         logger.error("Não foi possível carregar perguntas (nuvem nem local): %s", e)
         return []
 
-
 @st.cache_data(ttl=10)
 def buscar_adesao_nuvem() -> dict:
     ok, dados = _chamar_api(acao_query="buscar_adesao", timeout=10, tentativas=2)
     if ok and isinstance(dados, dict):
         return dados
     return {}
-
 
 RODADA_ATUAL = buscar_rodada_ativa()
 PERGUNTAS_RAW = buscar_perguntas_nuvem()
@@ -139,60 +138,47 @@ _padroes = {
     "restaurado": False,
     "tentativas_login": 0,
     "bloqueado_ate": 0.0,
-    "envios_pendentes": [],
 }
 for chave, valor in _padroes.items():
     if chave not in st.session_state:
         st.session_state[chave] = valor
 
 # ==============================================================================
-# COOKIES & GERENCIAMENTO DE RESPOSTAS
+# COOKIES & GERENCIAMENTO DE RESPOSTAS EM BACKGROUND
 # ==============================================================================
 def salvar_progresso_cookie():
-    """Salva o progresso no navegador ao navegar entre páginas."""
+    """Salva o progresso no navegador com chaves ESTÁTICAS para evitar pulo de tela."""
     if not cookie_manager or st.session_state.enviado:
         return
     try:
-        now_ts = str(time.time())
-        cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val=str(st.session_state.bloco_index),
-                           max_age=7776000, key=f"ck_bl_{now_ts}")
-        cookie_manager.set(cookie=f"{RODADA_ATUAL}_sessao", val=str(st.session_state.id_sessao),
-                           max_age=7776000, key=f"ck_se_{now_ts}")
-        cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val=json.dumps(st.session_state.respostas),
-                           max_age=7776000, key=f"ck_re_{now_ts}")
+        cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val=str(st.session_state.bloco_index), max_age=7776000, key="ck_save_bloco")
+        cookie_manager.set(cookie=f"{RODADA_ATUAL}_sessao", val=str(st.session_state.id_sessao), max_age=7776000, key="ck_save_sessao")
+        cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val=json.dumps(st.session_state.respostas), max_age=7776000, key="ck_save_respostas")
     except Exception as e:
         logger.warning("Falha ao salvar cookies de progresso: %s", e)
 
-
 def limpar_cookies_progresso():
-    """Bloqueia o navegador pós-envio e limpa os cookies temporários."""
+    """Bloqueia o navegador pós-envio e limpa os cookies temporários estaticamente."""
     if not cookie_manager:
         return
     try:
-        now_end = str(time.time())
-        cookie_manager.set(cookie=RODADA_ATUAL, val="respondido", max_age=7776000, key=f"ck_done_{now_end}")
-        cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val="", max_age=0, key=f"ck_del_bl_{now_end}")
-        cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val="", max_age=0, key=f"ck_del_re_{now_end}")
+        cookie_manager.set(cookie=RODADA_ATUAL, val="respondido", max_age=7776000, key="ck_end_done")
+        cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val="", max_age=0, key="ck_end_del_bl")
+        cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val="", max_age=0, key="ck_end_del_re")
     except Exception as e:
         logger.warning("Falha ao limpar cookies: %s", e)
 
-
 def enviar_resposta_background(payload: dict):
-    """Envia uma resposta avulsa em segundo plano sem travar a interface."""
+    """Executado na Thread: Envia a resposta avulsa. Se falhar, joga na fila Thread-Safe."""
     ok, _ = _chamar_api(payload=payload, method="POST", tentativas=MAX_TENTATIVAS)
     if not ok:
-        st.session_state.envios_pendentes.append(payload)
-
+        FILA_ENVIOS_PENDENTES.put(payload)
 
 def reenviar_pendentes():
-    """Reenvia automaticamente respostas que falharam previamente."""
-    if not st.session_state.envios_pendentes:
-        return
-    pendentes = st.session_state.envios_pendentes
-    st.session_state.envios_pendentes = []
-    for payload in pendentes:
+    """Tira da fila itens pendentes e tenta enviar novamente."""
+    while not FILA_ENVIOS_PENDENTES.empty():
+        payload = FILA_ENVIOS_PENDENTES.get()
         threading.Thread(target=enviar_resposta_background, args=(payload,), daemon=True).start()
-
 
 def auto_salvar_resposta(q_id: int, bloco: str, texto: str, tipo: str):
     ui_key = f"ui_q_{q_id}"
@@ -203,6 +189,7 @@ def auto_salvar_resposta(q_id: int, bloco: str, texto: str, tipo: str):
     val_clean = str(valor_raw).strip()
     st.session_state.respostas[f"q_{q_id}"] = val_clean
     id_sessao = st.session_state.get("id_sessao")
+    
     if not id_sessao:
         return
 
@@ -217,9 +204,9 @@ def auto_salvar_resposta(q_id: int, bloco: str, texto: str, tipo: str):
         "resposta": val_clean,
         "setor": "Geral",
     }
-    reenviar_pendentes()
+    
+    reenviar_pendentes() # Sempre tenta limpar a fila antes de enviar um novo
     threading.Thread(target=enviar_resposta_background, args=(payload,), daemon=True).start()
-
 
 # ==============================================================================
 # CALLBACKS DE NAVEGAÇÃO
@@ -228,16 +215,13 @@ def callback_iniciar_pesquisa():
     st.session_state.bloco_index = 0
     salvar_progresso_cookie()
 
-
 def callback_voltar_tema():
     st.session_state.bloco_index = max(-1, st.session_state.bloco_index - 1)
     salvar_progresso_cookie()
 
-
 def callback_avancar_tema():
     st.session_state.bloco_index += 1
     salvar_progresso_cookie()
-
 
 # ==============================================================================
 # INTERFACE GRÁFICA (UI)
@@ -422,7 +406,7 @@ with aba_admin:
     else:
         senha = st.text_input("Senha Master do RH:", type="password")
 
-        senha_correta = bool(senha) and hmac.compare_digest(senha, SENHA_ADMIN)
+        senha_correta = bool(senha) and hmac.compare_digest(senha.encode('utf-8'), SENHA_ADMIN.encode('utf-8'))
 
         if senha and not senha_correta:
             st.session_state.tentativas_login += 1
