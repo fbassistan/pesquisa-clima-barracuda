@@ -36,18 +36,6 @@ st.markdown(f"""
         background-color: {COR_FUNDO} !important;
     }}
     
-    /* Oculta a área visual do Cookie Manager para evitar pulos na tela */
-    iframe[title*="cookie_manager"], 
-    iframe[title*="extra_streamlit_components"],
-    div[data-testid="stCustomComponentV1"] iframe {{
-        position: fixed !important;
-        top: -9999px !important;
-        left: -9999px !important;
-        visibility: hidden !important;
-        height: 0px !important;
-        width: 0px !important;
-    }}
-    
     /* Força todos os textos para PRETO */
     .stApp, .stApp *, html, body, p, span, label, h1, h2, h3, h4, h5, h6,
     [data-testid="stMarkdownContainer"], [data-testid="stHeader"], [data-baseweb="tab"],
@@ -55,12 +43,12 @@ st.markdown(f"""
         color: #000000 !important;
     }}
     
-    /* Exceção: Letra BRANCA para caixas/elementos com fundo escuro ou preto */
+    /* Exceção: Letra BRANCA para caixas/elementos com fundo escuro ou preto (ex: código embutido, tooltips) */
     code, pre, code *, pre *, kbd, [data-testid="stCode"] *, [data-baseweb="tooltip"] * {{
         color: #FFFFFF !important;
     }}
     
-    /* Fundo BRANCO com texto PRETO para Caixas de Texto */
+    /* Fundo BRANCO com texto PRETO para Caixas de Texto (Perguntas Abertas e Campo de Senha RH) */
     div[data-baseweb="textarea"], textarea,
     div[data-baseweb="input"], input, input[type="password"], input[type="text"] {{
         background-color: #FFFFFF !important;
@@ -68,7 +56,7 @@ st.markdown(f"""
         border-radius: 6px !important;
     }}
 
-    /* Fundo BRANCO com texto PRETO para Caixas de Alerta e Avisos */
+    /* Fundo BRANCO com texto PRETO para Caixas de Alerta, Avisos e Carregamento */
     div[data-testid="stAlert"], .stAlert,
     div[data-testid="stSpinner"], div[data-testid="stStatusWidget"] {{
         background-color: #FFFFFF !important;
@@ -92,7 +80,7 @@ st.markdown(f"""
         transform: translateY(-1px) !important;
     }}
     
-    /* Estilização do Botão Voltar (Secundário) */
+    /* Estilização do Botão Voltar (Secundário) - Fundo BRANCO e Texto PRETO */
     div.stButton > button:not([kind="primary"]) {{
         background-color: #FFFFFF !important;
         color: #000000 !important;
@@ -128,7 +116,7 @@ st.markdown(f"""
 URL_WEB_APP = "https://script.google.com/macros/s/AKfycbzvxIXvcisyDL5ljMD8gSwYwKhF_bFdvKtG2M-_D1G7Rv26-TfFd-vYR-zxJ0PNIU-XtA/exec"
 SENHA_ADMIN = "RH2026"
 
-TIMEOUT_PADRAO = 10
+TIMEOUT_PADRAO = 12
 MAX_TENTATIVAS_LOGIN = 5
 BLOQUEIO_LOGIN_SEGUNDOS = 60
 
@@ -246,34 +234,34 @@ for chave, valor in _padroes.items():
 # COOKIES & GERENCIAMENTO DE RESPOSTAS
 # ==============================================================================
 def salvar_progresso_cookie():
-    """Salva com chaves estáticas para evitar o acúmulo de componentes na memória do Streamlit."""
     if not cookie_manager or st.session_state.enviado:
         return
     try:
+        now_ts = str(time.time())
         cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val=str(st.session_state.bloco_index),
-                           max_age=7776000, key="ck_bl_set")
+                           max_age=7776000, key=f"ck_bl_{now_ts}")
         cookie_manager.set(cookie=f"{RODADA_ATUAL}_sessao", val=str(st.session_state.id_sessao),
-                           max_age=7776000, key="ck_se_set")
+                           max_age=7776000, key=f"ck_se_{now_ts}")
         cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val=json.dumps(st.session_state.respostas),
-                           max_age=7776000, key="ck_re_set")
+                           max_age=7776000, key=f"ck_re_{now_ts}")
     except Exception as e:
         logger.warning("Falha ao salvar cookies de progresso: %s", e)
 
 
 def limpar_cookies_progresso():
-    """Limpa os cookies temporários pós-envio usando chaves estáticas."""
     if not cookie_manager:
         return
     try:
-        cookie_manager.set(cookie=RODADA_ATUAL, val="respondido", max_age=7776000, key="ck_done_set")
-        cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val="", max_age=0, key="ck_del_bl_set")
-        cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val="", max_age=0, key="ck_del_re_set")
+        now_end = str(time.time())
+        cookie_manager.set(cookie=RODADA_ATUAL, val="respondido", max_age=7776000, key=f"ck_done_{now_end}")
+        cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val="", max_age=0, key=f"ck_del_bl_{now_end}")
+        cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val="", max_age=0, key=f"ck_del_re_{now_end}")
     except Exception as e:
         logger.warning("Falha ao limpar cookies: %s", e)
 
 
 def _enviar_resposta_background_sem_retry(payload: dict):
-    ok, _ = _chamar_api(payload=payload, method="POST", timeout=10, tentativas=1)
+    ok, _ = _chamar_api(payload=payload, method="POST", timeout=12, tentativas=1)
     if not ok:
         st.session_state.envios_pendentes.append(payload)
 
@@ -297,12 +285,11 @@ def salvar_resposta_se_necessario(q_id: int, bloco: str, texto: str, val_clean: 
     if not id_sessao:
         return
 
-    st.session_state.respostas[q_key] = val_clean
-
     if st.session_state.respostas_enviadas.get(q_key) == val_clean:
         return
 
     st.session_state.respostas_enviadas[q_key] = val_clean
+    st.session_state.respostas[q_key] = val_clean
 
     payload = {
         "acao": "salvar_resposta_avulsa",
@@ -320,19 +307,24 @@ def salvar_resposta_se_necessario(q_id: int, bloco: str, texto: str, val_clean: 
         reenviar_pendentes()
         threading.Thread(target=_enviar_resposta_background_sem_retry, args=(payload,), daemon=True).start()
     else:
-        _chamar_api(payload=payload, method="POST", timeout=10, tentativas=1)
+        _chamar_api(payload=payload, method="POST", timeout=12, tentativas=1)
+
+
+def auto_salvar_resposta(q_id: int, bloco: str, texto: str, tipo: str):
+    ui_key = f"ui_q_{q_id}"
+    valor_raw = st.session_state.get(ui_key)
+    if valor_raw is not None and str(valor_raw).strip() != "":
+        salvar_resposta_se_necessario(q_id, bloco, texto, str(valor_raw).strip(), assincrono=True)
 
 
 def garantir_todas_respostas_salvas():
-    """Varre e envia em background apenas as perguntas que ainda não foram marcadas como enviadas."""
     for q in PERGUNTAS_RAW:
         q_id = int(q["id"])
         q_key = f"q_{q_id}"
         val = st.session_state.respostas.get(q_key)
         if val and str(val).strip():
             bloco_nome = q.get("bloco", "Geral").strip()
-            # Envia de forma rápida para não congelar o servidor
-            salvar_resposta_se_necessario(q_id, bloco_nome, q.get("texto", "").strip(), str(val).strip(), assincrono=True)
+            salvar_resposta_se_necessario(q_id, bloco_nome, q.get("texto", "").strip(), str(val).strip(), assincrono=False)
 
 
 def verificar_bloco_completo(blocos_perguntas: list) -> bool:
@@ -368,6 +360,7 @@ def callback_avancar_tema():
 # INTERFACE GRÁFICA (UI)
 # ==============================================================================
 
+# Cabeçalho com Logo Pequena na Lateral Esquerda ao Lado do Título
 col_logo, col_titulo = st.columns([1, 5])
 with col_logo:
     try:
@@ -384,10 +377,9 @@ aba_pesquisa, aba_admin = st.tabs(["📝 Responder Pesquisa", "⚙️ Painel de 
 # ABA 1: FLUXO DO COLABORADOR
 # ------------------------------------------------------------------------------
 with aba_pesquisa:
-    all_cookies = cookie_manager.get_all() if cookie_manager else None
+    all_cookies = cookie_manager.get_all() if cookie_manager else {}
 
-    # RESTAURAÇÃO DE SESSÃO E COOKIES
-    if not st.session_state.restaurado and isinstance(all_cookies, dict):
+    if not st.session_state.restaurado and all_cookies:
         if all_cookies.get(RODADA_ATUAL) == "respondido":
             st.session_state.enviado = True
             st.session_state.restaurado = True
@@ -398,25 +390,19 @@ with aba_pesquisa:
 
             if saved_sessao:
                 st.session_state.id_sessao = saved_sessao
-
             if saved_bloco is not None:
                 try:
                     st.session_state.bloco_index = int(saved_bloco)
                 except ValueError:
                     pass
-
             if saved_resp:
                 try:
-                    respostas_carregadas = json.loads(saved_resp)
-                    if isinstance(respostas_carregadas, dict):
-                        st.session_state.respostas.update(respostas_carregadas)
-                        st.session_state.respostas_enviadas.update({
-                            k: str(v).strip() for k, v in respostas_carregadas.items() if v
-                        })
-                        for q_k, val in respostas_carregadas.items():
-                            st.session_state[f"ui_{q_k}"] = val
-                except Exception as e:
-                    logger.warning("Falha ao carregar respostas anteriores do cookie: %s", e)
+                    st.session_state.respostas = json.loads(saved_resp)
+                    st.session_state.respostas_enviadas = {
+                        k: str(v).strip() for k, v in st.session_state.respostas.items() if v
+                    }
+                except Exception:
+                    pass
 
             if saved_bloco is not None or saved_sessao is not None or saved_resp is not None:
                 st.session_state.restaurado = True
@@ -482,15 +468,16 @@ with aba_pesquisa:
                     options = [str(opt).strip() for opt in q["opcoes"]]
                     saved_val = st.session_state.respostas.get(q_key)
 
-                    if saved_val and str(saved_val).strip() in options:
-                        if ui_key not in st.session_state or not st.session_state[ui_key]:
-                            st.session_state[ui_key] = str(saved_val).strip()
+                    if saved_val and str(saved_val).strip() in options and ui_key not in st.session_state:
+                        st.session_state[ui_key] = str(saved_val).strip()
 
                     idx_default = options.index(st.session_state[ui_key]) if ui_key in st.session_state and st.session_state[ui_key] in options else None
 
                     resposta = st.radio(
                         label=q["texto"], label_visibility="collapsed",
-                        options=options, index=idx_default, key=ui_key
+                        options=options, index=idx_default, key=ui_key,
+                        on_change=auto_salvar_resposta,
+                        args=(q_id, bloco_nome, q["texto"], q["tipo"]),
                     )
 
                     if resposta:
@@ -498,11 +485,13 @@ with aba_pesquisa:
 
                 elif q["tipo"] == "aberta":
                     saved_val = str(st.session_state.respostas.get(q_key, ""))
-                    if saved_val and (ui_key not in st.session_state or not st.session_state[ui_key]):
+                    if saved_val and ui_key not in st.session_state:
                         st.session_state[ui_key] = saved_val
 
                     resposta_texto = st.text_area(
-                        label=q["texto"], label_visibility="collapsed", key=ui_key
+                        label=q["texto"], label_visibility="collapsed", key=ui_key,
+                        on_change=auto_salvar_resposta,
+                        args=(q_id, bloco_nome, q["texto"], q["tipo"]),
                     )
 
                     if resposta_texto and resposta_texto.strip():
@@ -524,14 +513,7 @@ with aba_pesquisa:
                 if st.session_state.bloco_index < len(LISTA_BLOCOS) - 1:
                     if st.button("Avançar Tema ➡️", type="primary"):
                         if bloco_pronto:
-                            for q_bloco in perguntas_atuais:
-                                q_id_b = int(q_bloco["id"])
-                                q_key_b = f"q_{q_id_b}"
-                                val_b = st.session_state.respostas.get(q_key_b, "")
-                                salvar_resposta_se_necessario(q_id_b, bloco_nome, q_bloco["texto"], val_b, assincrono=True)
-                            
-                            st.session_state.bloco_index += 1
-                            salvar_progresso_cookie()
+                            callback_avancar_tema()
                             st.rerun()
                         else:
                             st.warning("⚠️ Responda a todas as perguntas deste bloco (incluindo o campo de texto) para avançar.")
@@ -545,21 +527,9 @@ with aba_pesquisa:
                                     "id_sessao": st.session_state.id_sessao,
                                     "rodada": RODADA_ATUAL,
                                 }
-                                ok, resposta_api = _chamar_api(payload=payload, method="POST", timeout=12, tentativas=2)
+                                ok, resposta_api = _chamar_api(payload=payload, method="POST", timeout=12, tentativas=1)
 
-                                # VALIDAÇÃO FLEXÍVEL DA RESPOSTA DA API
-                                sucesso = False
-                                if ok:
-                                    if isinstance(resposta_api, dict):
-                                        res_str = json.dumps(resposta_api).lower()
-                                        if "success" in res_str or "sucesso" in res_str or resposta_api.get("status") in ["Success", "success"]:
-                                            sucesso = True
-                                    elif isinstance(resposta_api, str):
-                                        if "success" in resposta_api.lower() or "sucesso" in resposta_api.lower():
-                                            sucesso = True
-                                    elif resposta_api is True:
-                                        sucesso = True
-
+                                sucesso = ok and isinstance(resposta_api, str) and "Success" in resposta_api
                                 if sucesso:
                                     limpar_cookies_progresso()
                                     st.session_state.enviado = True
