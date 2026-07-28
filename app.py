@@ -24,7 +24,7 @@ logger = logging.getLogger("pesquisa_clima")
 URL_OU_CAMINHO_LOGO = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRCoWtXmWKvlUcgGnpVEm56JhjQWztWcdAR6Q&s" 
 
 # ➔ PALETA DE CORES DA EMPRESA
-COR_FUNDO = "#42553f"          # Cor de Fundo da Aplicação
+COR_FUNDO = "#F5F5DC"          # Cor de Fundo da Aplicação
 COR_PRIMARIA = "#6B8E23"       # Cor escura para Botões e Destaques (alta legibilidade sobre o fundo)
 COR_HOVER_BOTAO = "#0000FF"    # Cor ao passar o mouse por cima do botão
 
@@ -377,10 +377,10 @@ with aba_pesquisa:
             st.write("Esta pesquisa é um espaço para você dizer, com liberdade, como está sendo a sua experiência aqui no Barracuda. Sua opinião é o que orienta decisões estratégicas sobre o que precisa melhorar e o que vale a pena manter.")
 
             st.markdown("#### 🔒 É confidencial")
-            st.write("Ninguém vai saber quais foram as suas respostas individuais. Os resultados são analisados de forma consolidada, considerando toda a empresa. Ninguém terá acesso a respostas individuais nem a recortes por área ou equipe.")
+            st.write("Ninguém vai saber quais foram as suas respostas individuais. Os resultados são analisados e consolidados, considerando toda a empresa. Ninguém terá acesso a respostas individuais nem a recortes por área ou equipe.")
 
             st.markdown("#### 🙋 É voluntária")
-            st.write("Você decide se quer participar. Mas quanto mais gente responder, mais completo e representativo fica o retrato do nosso clima.")
+            st.write("Você decide se quer participar. Quanto maior a participação dos colaboradores mais completo e representativo será o resultado da pesquisa de clima organizacional.")
 
             st.info("⏱️ **Leva poucos minutos.** As perguntas estão organizadas por tema e usam formatos rápidos: escalas de 1 a 5, sim ou não e alguns campos abertos para quem quiser se aprofundar.")
             st.warning("🤝 **Seja honesto(a).** Essa pesquisa só cumpre seu propósito se refletir a realidade, inclusive os pontos difíceis. Toda resposta é bem-vinda, elogio ou crítica.")
@@ -388,9 +388,9 @@ with aba_pesquisa:
 
             st.markdown("---")
             st.markdown("### Nossa Identidade")
-            st.markdown('**🎯 Nossa Missão:** *"Proporcionar estadias transformadoras por meio da sabedoria e hospitalidade genuína dos baianos, e de experiências que promovam conexões autênticas com a natureza e a cultura local, além de contribuir com um legado positivo para Itacaré"*')
-            st.markdown("**👁️ Nossa Visão:** *Consolidar-se como um destino único, reconhecido globalmente*")
-            st.markdown("**💎 Nossos Valores:**\n- Excelência em hospitalidade\n- Autenticidade\n- Integridade\n- Responsabilidade socioambiental\n- Inovação")
+            st.markdown('** Nossa Missão:** *"Proporcionar estadias transformadoras por meio da sabedoria e hospitalidade genuína dos baianos, e de experiências que promovam conexões autênticas com a natureza e a cultura local, além de contribuir com um legado positivo para Itacaré"*')
+            st.markdown("** Nossa Visão:** *Consolidar-se como um destino único, reconhecido globalmente*")
+            st.markdown("** Nossos Valores:**\n- Excelência em hospitalidade\n- Autenticidade\n- Integridade\n- Responsabilidade socioambiental\n- Inovação")
 
             st.markdown("---")
             st.write("")
