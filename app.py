@@ -25,10 +25,10 @@ URL_OU_CAMINHO_LOGO = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRCo
 
 # ➔ PALETA DE CORES DA EMPRESA
 COR_FUNDO = "#F5F5DC"          # Cor de Fundo da Aplicação
-COR_PRIMARIA = "#6B8E23"       # Cor escura para Botões e Destaques (alta legibilidade sobre o fundo)
+COR_PRIMARIA = "#6B8E23"       # Cor para Botões e Destaques
 COR_HOVER_BOTAO = "#0000FF"    # Cor ao passar o mouse por cima do botão
 
-# Injeção de CSS personalizado no Streamlit
+# Injeção de CSS personalizado no Streamlit (Textos em Preto)
 st.markdown(f"""
     <style>
     /* Cor de Fundo de toda a página */
@@ -36,10 +36,17 @@ st.markdown(f"""
         background-color: {COR_FUNDO} !important;
     }}
     
-    /* Estilização dos Botões Principais */
+    /* Força todos os textos (títulos, parágrafos, rótulos, opções de rádio, markdown) para PRETO */
+    .stApp, .stApp *, html, body, p, span, label, h1, h2, h3, h4, h5, h6,
+    [data-testid="stMarkdownContainer"], [data-testid="stHeader"], [data-baseweb="tab"],
+    div[role="radiogroup"] label, textarea, input {{
+        color: #000000 !important;
+    }}
+    
+    /* Estilização dos Botões Principais - Texto em Preto */
     div.stButton > button[kind="primary"] {{
         background-color: {COR_PRIMARIA} !important;
-        color: #FFFFFF !important;
+        color: #000000 !important;
         border: none !important;
         border-radius: 8px !important;
         font-weight: bold !important;
@@ -47,7 +54,14 @@ st.markdown(f"""
     }}
     div.stButton > button[kind="primary"]:hover {{
         background-color: {COR_HOVER_BOTAO} !important;
+        color: #FFFFFF !important;
         transform: translateY(-1px) !important;
+    }}
+    
+    /* Estilização de Botões Secundários */
+    div.stButton > button {{
+        color: #000000 !important;
+        border-color: #000000 !important;
     }}
     
     /* Cor da Barra de Progresso */
@@ -60,6 +74,9 @@ st.markdown(f"""
         border-bottom-color: {COR_PRIMARIA} !important;
         color: {COR_PRIMARIA} !important;
         font-weight: bold !important;
+    }}
+    button[data-baseweb="tab"] {{
+        color: #000000 !important;
     }}
     </style>
 """, unsafe_allow_html=True)
