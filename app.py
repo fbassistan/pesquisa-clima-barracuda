@@ -25,7 +25,7 @@ URL_OU_CAMINHO_LOGO = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRCo
 
 # ➔ PALETA DE CORES DA EMPRESA
 COR_FUNDO = "#F5F5DC"          # Cor de Fundo da Aplicação
-COR_PRIMARIA = "#6B8E23"       # Cor para Botões e Destaques
+COR_PRIMARIA = "#DEB887"       # Cor para Botões e Destaques
 COR_HOVER_BOTAO = "#0000FF"    # Cor ao passar o mouse por cima do botão
 
 # Injeção de CSS personalizado no Streamlit (Textos em Preto)
