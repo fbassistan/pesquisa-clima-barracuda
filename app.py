@@ -36,16 +36,21 @@ st.markdown(f"""
         background-color: {COR_FUNDO} !important;
     }}
     
-    /* ELIMINAÇÃO DEFINITIVA DOS PULOS DE TELA: Oculta o iframe de cookies */
+    /* FIXAÇÃO E ESTABILIDADE DA TELA: Oculta totalmente o container de cookies do fluxo do layout */
+    div[data-testid="stCustomComponentV1"] {{
+        display: none !important;
+        height: 0px !important;
+        margin: 0px !important;
+        padding: 0px !important;
+    }}
     iframe[title*="cookie_manager"], 
-    iframe[title*="extra_streamlit_components"],
-    div[data-testid="stCustomComponentV1"] iframe {{
-        position: fixed !important;
+    iframe[title*="extra_streamlit_components"] {{
+        display: none !important;
+        position: absolute !important;
         top: -9999px !important;
         left: -9999px !important;
-        visibility: hidden !important;
-        height: 0px !important;
         width: 0px !important;
+        height: 0px !important;
     }}
     
     /* Força todos os textos para PRETO */
@@ -55,7 +60,7 @@ st.markdown(f"""
         color: #000000 !important;
     }}
     
-    /* Exceção: Letra BRANCA para caixas/elementos com fundo escuro */
+    /* Exceção: Letra BRANCA para elementos com fundo escuro */
     code, pre, code *, pre *, kbd, [data-testid="stCode"] *, [data-baseweb="tooltip"] * {{
         color: #FFFFFF !important;
     }}
@@ -246,8 +251,8 @@ for chave, valor in _padroes.items():
 # COOKIES & GERENCIAMENTO DE RESPOSTAS
 # ==============================================================================
 def salvar_progresso_cookie():
-    """Só permite salvar no cookie DEPOIS que a restauração inicial foi confirmada."""
-    if not cookie_manager or st.session_state.enviado or not st.session_state.restaurado:
+    """Grava o estado no navegador de forma controlada nas transições de tela."""
+    if not cookie_manager or st.session_state.enviado:
         return
     try:
         cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val=str(st.session_state.bloco_index),
@@ -261,7 +266,7 @@ def salvar_progresso_cookie():
 
 
 def limpar_cookies_progresso():
-    """Limpa os cookies de progresso ao concluir a pesquisa."""
+    """Limpa os cookies temporários do progresso após o envio final."""
     if not cookie_manager:
         return
     try:
@@ -288,7 +293,7 @@ def reenviar_pendentes():
 
 
 def salvar_resposta_se_necessario(q_id: int, bloco: str, texto: str, val_clean: str, assincrono: bool = True):
-    """Grava/Substitui a resposta evitando criar registros duplicados."""
+    """Envia a resposta garantindo substituição sem criar duplicatas."""
     if not val_clean or not str(val_clean).strip():
         return
 
@@ -300,7 +305,7 @@ def salvar_resposta_se_necessario(q_id: int, bloco: str, texto: str, val_clean: 
 
     st.session_state.respostas[q_key] = val_clean
 
-    # Se a resposta exatamente igual já foi transmitida para esta sessão, aborta
+    # Aborta caso o valor exato já tenha sido transmitido anteriormente
     if st.session_state.respostas_enviadas.get(q_key) == val_clean:
         return
 
@@ -316,7 +321,7 @@ def salvar_resposta_se_necessario(q_id: int, bloco: str, texto: str, val_clean: 
         "enunciado": texto,
         "resposta": val_clean,
         "setor": "Geral",
-        "substituir": True  # Orienta a API a substituir caso o registro já exista
+        "substituir": True  # Instrução para a API substituir a resposta anterior se ela já existir
     }
 
     if assincrono:
@@ -327,17 +332,16 @@ def salvar_resposta_se_necessario(q_id: int, bloco: str, texto: str, val_clean: 
 
 
 def auto_salvar_resposta(q_id: int, bloco: str, texto: str, tipo: str):
-    """Acionado na digitação/seleção do colaborador."""
+    """Callback acionado na interatividade dos widgets."""
     ui_key = f"ui_q_{q_id}"
     valor_raw = st.session_state.get(ui_key)
     if valor_raw is not None and str(valor_raw).strip() != "":
         val_clean = str(valor_raw).strip()
         salvar_resposta_se_necessario(q_id, bloco, texto, val_clean, assincrono=True)
-        salvar_progresso_cookie()
 
 
 def garantir_todas_respostas_salvas():
-    """Varre e sincroniza apenas pendências antes do envio final."""
+    """Sincroniza perguntas do bloco atual antes do encerramento final."""
     for q in PERGUNTAS_RAW:
         q_id = int(q["id"])
         q_key = f"q_{q_id}"
@@ -399,7 +403,7 @@ aba_pesquisa, aba_admin = st.tabs(["📝 Responder Pesquisa", "⚙️ Painel de 
 with aba_pesquisa:
     all_cookies = cookie_manager.get_all() if cookie_manager else None
 
-    # RESTAURAÇÃO DE SESSÃO E PROGRESSO ANTERIOR DO NAVEGADOR
+    # RESTAURAÇÃO DE PROGRESSO DO NAVEGADOR
     if not st.session_state.restaurado and isinstance(all_cookies, dict) and len(all_cookies) > 0:
         if all_cookies.get(RODADA_ATUAL) == "respondido":
             st.session_state.enviado = True
@@ -409,16 +413,12 @@ with aba_pesquisa:
             saved_sessao = all_cookies.get(f"{RODADA_ATUAL}_sessao")
             saved_resp = all_cookies.get(f"{RODADA_ATUAL}_respostas")
 
-            has_data = False
-
             if saved_sessao:
                 st.session_state.id_sessao = str(saved_sessao).strip()
-                has_data = True
 
             if saved_bloco is not None:
                 try:
                     st.session_state.bloco_index = int(saved_bloco)
-                    has_data = True
                 except ValueError:
                     pass
 
@@ -427,23 +427,20 @@ with aba_pesquisa:
                     respostas_carregadas = json.loads(saved_resp)
                     if isinstance(respostas_carregadas, dict):
                         st.session_state.respostas.update(respostas_carregadas)
-                        # Registra no controle de envios para proibir duplicação
+                        # Marca como enviadas para não duplicar chamadas à planilha ao reabrir
                         st.session_state.respostas_enviadas.update({
                             k: str(v).strip() for k, v in respostas_carregadas.items() if v
                         })
-                        # Alimenta os widgets da interface para exibir as marcadas
+                        # Carrega para a UI
                         for q_k, val in respostas_carregadas.items():
                             if val:
                                 st.session_state[f"ui_{q_k}"] = str(val).strip()
-                        has_data = True
                 except Exception as e:
                     logger.warning("Falha ao carregar respostas anteriores do cookie: %s", e)
 
-            if has_data:
+            if saved_bloco is not None or saved_sessao is not None or saved_resp is not None:
                 st.session_state.restaurado = True
-                st.rerun()
 
-    # Define id_sessao caso seja primeiro acesso genuíno
     if not st.session_state.id_sessao:
         st.session_state.id_sessao = f"S_{str(uuid.uuid4())[:8]}"
 
@@ -503,13 +500,15 @@ with aba_pesquisa:
 
                 if q["tipo"] == "radio":
                     options = [str(opt).strip() for opt in q["opcoes"]]
-                    saved_val = st.session_state.respostas.get(q_key)
+                    
+                    if q_key in st.session_state.respostas:
+                        saved_val = st.session_state.respostas[q_key]
+                        if saved_val in options and ui_key not in st.session_state:
+                            st.session_state[ui_key] = saved_val
 
-                    if saved_val and str(saved_val).strip() in options:
-                        if ui_key not in st.session_state or not st.session_state[ui_key]:
-                            st.session_state[ui_key] = str(saved_val).strip()
-
-                    idx_default = options.index(st.session_state[ui_key]) if ui_key in st.session_state and st.session_state[ui_key] in options else None
+                    idx_default = None
+                    if ui_key in st.session_state and st.session_state[ui_key] in options:
+                        idx_default = options.index(st.session_state[ui_key])
 
                     resposta = st.radio(
                         label=q["texto"], label_visibility="collapsed",
