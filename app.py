@@ -46,7 +46,7 @@ st.markdown(f"""
     /* Estilização dos Botões Principais - Texto em Preto */
     div.stButton > button[kind="primary"] {{
         background-color: {COR_PRIMARIA} !important;
-        color: #000000 !important;
+        color: #DEB887 !important;
         border: none !important;
         border-radius: 8px !important;
         font-weight: bold !important;
