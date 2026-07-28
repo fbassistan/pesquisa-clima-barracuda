@@ -28,7 +28,7 @@ COR_FUNDO = "#F5F5DC"          # Cor de Fundo da Aplicação
 COR_PRIMARIA = "#DEB887"       # Cor para Botões e Destaques
 COR_HOVER_BOTAO = "#0000FF"    # Cor ao passar o mouse por cima do botão
 
-# Injeção de CSS personalizado no Streamlit (Textos em Preto)
+# Injeção de CSS personalizado no Streamlit
 st.markdown(f"""
     <style>
     /* Cor de Fundo de toda a página */
@@ -36,14 +36,21 @@ st.markdown(f"""
         background-color: {COR_FUNDO} !important;
     }}
     
-    /* Força todos os textos (títulos, parágrafos, rótulos, opções de rádio, markdown) para PRETO */
+    /* Força todos os textos para PRETO */
     .stApp, .stApp *, html, body, p, span, label, h1, h2, h3, h4, h5, h6,
     [data-testid="stMarkdownContainer"], [data-testid="stHeader"], [data-baseweb="tab"],
-    div[role="radiogroup"] label, textarea, input {{
+    div[role="radiogroup"] label {{
         color: #000000 !important;
     }}
     
-    /* Estilização dos Botões Principais - Texto em Preto */
+    /* Fundo BRANCO com texto PRETO para Caixas de Texto (Perguntas Abertas) */
+    div[data-baseweb="textarea"], textarea {{
+        background-color: #FFFFFF !important;
+        color: #000000 !important;
+        border-radius: 6px !important;
+    }}
+
+    /* Estilização dos Botões Principais - Avançar / Concluir */
     div.stButton > button[kind="primary"] {{
         background-color: {COR_PRIMARIA} !important;
         color: #000000 !important;
@@ -58,8 +65,17 @@ st.markdown(f"""
         transform: translateY(-1px) !important;
     }}
     
-    /* Estilização de Botões Secundários */
-    div.stButton > button {{
+    /* Estilização do Botão Voltar (Secundário) - Fundo BRANCO e Texto PRETO */
+    div.stButton > button:not([kind="primary"]) {{
+        background-color: #FFFFFF !important;
+        color: #000000 !important;
+        border: 1px solid #000000 !important;
+        border-radius: 8px !important;
+        font-weight: bold !important;
+        transition: all 0.3s ease !important;
+    }}
+    div.stButton > button:not([kind="primary"]):hover {{
+        background-color: #E0E0E0 !important;
         color: #000000 !important;
         border-color: #000000 !important;
     }}
