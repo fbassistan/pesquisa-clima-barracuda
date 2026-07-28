@@ -36,6 +36,18 @@ st.markdown(f"""
         background-color: {COR_FUNDO} !important;
     }}
     
+    /* ELIMINAÇÃO DEFINITIVA DOS PULOS DE TELA: Oculta a área do Cookie Manager da estrutura visual */
+    iframe[title*="cookie_manager"], 
+    iframe[title*="extra_streamlit_components"],
+    div[data-testid="stCustomComponentV1"] iframe {{
+        position: fixed !important;
+        top: -9999px !important;
+        left: -9999px !important;
+        visibility: hidden !important;
+        height: 0px !important;
+        width: 0px !important;
+    }}
+    
     /* Força todos os textos para PRETO */
     .stApp, .stApp *, html, body, p, span, label, h1, h2, h3, h4, h5, h6,
     [data-testid="stMarkdownContainer"], [data-testid="stHeader"], [data-baseweb="tab"],
@@ -234,7 +246,7 @@ for chave, valor in _padroes.items():
 # COOKIES & GERENCIAMENTO DE RESPOSTAS
 # ==============================================================================
 def salvar_progresso_cookie():
-    """Salva o progresso no navegador no momento de transição de tela."""
+    """Salva silenciosamente no navegador o estado completo da sessão sem gerar pulos na tela."""
     if not cookie_manager or st.session_state.enviado:
         return
     try:
@@ -373,8 +385,8 @@ aba_pesquisa, aba_admin = st.tabs(["📝 Responder Pesquisa", "⚙️ Painel de 
 with aba_pesquisa:
     all_cookies = cookie_manager.get_all() if cookie_manager else None
 
-    # RESTAURAÇÃO SILENCIOSA DE COOKIES AO CARREGAR
-    if not st.session_state.restaurado and all_cookies is not None:
+    # RESTAURAÇÃO DE SESSÃO E COOKIES (Lê assim que o armazenamento do navegador responde)
+    if not st.session_state.restaurado and isinstance(all_cookies, dict):
         if all_cookies.get(RODADA_ATUAL) == "respondido":
             st.session_state.enviado = True
             st.session_state.restaurado = True
@@ -395,15 +407,16 @@ with aba_pesquisa:
             if saved_resp:
                 try:
                     respostas_carregadas = json.loads(saved_resp)
-                    st.session_state.respostas = respostas_carregadas
-                    st.session_state.respostas_enviadas = {
-                        k: str(v).strip() for k, v in respostas_carregadas.items() if v
-                    }
-                    for q_key, val in respostas_carregadas.items():
-                        ui_key = f"ui_{q_key}"
-                        st.session_state[ui_key] = val
+                    if isinstance(respostas_carregadas, dict):
+                        st.session_state.respostas.update(respostas_carregadas)
+                        st.session_state.respostas_enviadas.update({
+                            k: str(v).strip() for k, v in respostas_carregadas.items() if v
+                        })
+                        # Preenche os campos visuais para mostrar exatamente de onde o usuário parou
+                        for q_k, val in respostas_carregadas.items():
+                            st.session_state[f"ui_{q_k}"] = val
                 except Exception as e:
-                    logger.warning("Falha ao decodificar respostas do cookie: %s", e)
+                    logger.warning("Falha ao carregar respostas anteriores do cookie: %s", e)
 
             if saved_bloco is not None or saved_sessao is not None or saved_resp is not None:
                 st.session_state.restaurado = True
@@ -475,7 +488,6 @@ with aba_pesquisa:
 
                     idx_default = options.index(st.session_state[ui_key]) if ui_key in st.session_state and st.session_state[ui_key] in options else None
 
-                    # Sem on_change para manter a página 100% estática e sem pulos
                     resposta = st.radio(
                         label=q["texto"], label_visibility="collapsed",
                         options=options, index=idx_default, key=ui_key
@@ -489,7 +501,6 @@ with aba_pesquisa:
                     if saved_val and (ui_key not in st.session_state or not st.session_state[ui_key]):
                         st.session_state[ui_key] = saved_val
 
-                    # Sem on_change para manter a digitação sem re-renders
                     resposta_texto = st.text_area(
                         label=q["texto"], label_visibility="collapsed", key=ui_key
                     )
@@ -500,6 +511,9 @@ with aba_pesquisa:
                         st.session_state.respostas[q_key] = ""
 
                 st.write("")
+
+            # GRAVAÇÃO SILENCIOSA EM TEMPO REAL: Garante que cada letra e clique fique no cookie imediatamente
+            salvar_progresso_cookie()
 
             st.markdown("---")
             col_ant, _, col_prox = st.columns([1, 1, 1])
@@ -513,7 +527,6 @@ with aba_pesquisa:
                 if st.session_state.bloco_index < len(LISTA_BLOCOS) - 1:
                     if st.button("Avançar Tema ➡️", type="primary"):
                         if bloco_pronto:
-                            # Salva em lote as respostas do bloco e atualiza os cookies ao avançar
                             for q_bloco in perguntas_atuais:
                                 q_id_b = int(q_bloco["id"])
                                 q_key_b = f"q_{q_id_b}"
