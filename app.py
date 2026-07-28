@@ -246,7 +246,7 @@ for chave, valor in _padroes.items():
 # COOKIES & GERENCIAMENTO DE RESPOSTAS
 # ==============================================================================
 def salvar_progresso_cookie():
-    """Salva silenciosamente no navegador o estado completo da sessão sem gerar pulos na tela."""
+    """Salva silenciosamente no navegador o estado completo da sessão."""
     if not cookie_manager or st.session_state.enviado:
         return
     try:
@@ -385,7 +385,7 @@ aba_pesquisa, aba_admin = st.tabs(["📝 Responder Pesquisa", "⚙️ Painel de 
 with aba_pesquisa:
     all_cookies = cookie_manager.get_all() if cookie_manager else None
 
-    # RESTAURAÇÃO DE SESSÃO E COOKIES (Lê assim que o armazenamento do navegador responde)
+    # RESTAURAÇÃO DE SESSÃO E COOKIES
     if not st.session_state.restaurado and isinstance(all_cookies, dict):
         if all_cookies.get(RODADA_ATUAL) == "respondido":
             st.session_state.enviado = True
@@ -412,7 +412,6 @@ with aba_pesquisa:
                         st.session_state.respostas_enviadas.update({
                             k: str(v).strip() for k, v in respostas_carregadas.items() if v
                         })
-                        # Preenche os campos visuais para mostrar exatamente de onde o usuário parou
                         for q_k, val in respostas_carregadas.items():
                             st.session_state[f"ui_{q_k}"] = val
                 except Exception as e:
@@ -512,7 +511,6 @@ with aba_pesquisa:
 
                 st.write("")
 
-            # GRAVAÇÃO SILENCIOSA EM TEMPO REAL: Garante que cada letra e clique fique no cookie imediatamente
             salvar_progresso_cookie()
 
             st.markdown("---")
@@ -548,9 +546,21 @@ with aba_pesquisa:
                                     "id_sessao": st.session_state.id_sessao,
                                     "rodada": RODADA_ATUAL,
                                 }
-                                ok, resposta_api = _chamar_api(payload=payload, method="POST", timeout=12, tentativas=1)
+                                ok, resposta_api = _chamar_api(payload=payload, method="POST", timeout=12, tentativas=2)
 
-                                sucesso = ok and isinstance(resposta_api, str) and "Success" in resposta_api
+                                # VALIDAÇÃO ROBUSTA DA RESPOSTA DA API (Suporta Strings, Dicts e Bools)
+                                sucesso = False
+                                if ok:
+                                    if isinstance(resposta_api, dict):
+                                        res_str = json.dumps(resposta_api).lower()
+                                        if "success" in res_str or "sucesso" in res_str or resposta_api.get("status") in ["Success", "success"]:
+                                            sucesso = True
+                                    elif isinstance(resposta_api, str):
+                                        if "success" in resposta_api.lower() or "sucesso" in resposta_api.lower():
+                                            sucesso = True
+                                    elif resposta_api is True:
+                                        sucesso = True
+
                                 if sucesso:
                                     limpar_cookies_progresso()
                                     st.session_state.enviado = True
