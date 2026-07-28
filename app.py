@@ -43,7 +43,7 @@ st.markdown(f"""
         color: #000000 !important;
     }}
     
-    /* Exceção: Letra BRANCA para caixas/elementos com fundo escuro ou preto (ex: código embutido, tooltips) */
+    /* Exceção: Letra BRANCA para caixas/elementos com fundo escuro ou preto */
     code, pre, code *, pre *, kbd, [data-testid="stCode"] *, [data-baseweb="tooltip"] * {{
         color: #FFFFFF !important;
     }}
@@ -234,6 +234,7 @@ for chave, valor in _padroes.items():
 # COOKIES & GERENCIAMENTO DE RESPOSTAS
 # ==============================================================================
 def salvar_progresso_cookie():
+    """Salva o progresso no navegador no instante da navegação ou resposta."""
     if not cookie_manager or st.session_state.enviado:
         return
     try:
@@ -285,11 +286,12 @@ def salvar_resposta_se_necessario(q_id: int, bloco: str, texto: str, val_clean: 
     if not id_sessao:
         return
 
+    st.session_state.respostas[q_key] = val_clean
+
     if st.session_state.respostas_enviadas.get(q_key) == val_clean:
         return
 
     st.session_state.respostas_enviadas[q_key] = val_clean
-    st.session_state.respostas[q_key] = val_clean
 
     payload = {
         "acao": "salvar_resposta_avulsa",
@@ -315,6 +317,8 @@ def auto_salvar_resposta(q_id: int, bloco: str, texto: str, tipo: str):
     valor_raw = st.session_state.get(ui_key)
     if valor_raw is not None and str(valor_raw).strip() != "":
         salvar_resposta_se_necessario(q_id, bloco, texto, str(valor_raw).strip(), assincrono=True)
+        # Salva o cookie em tempo real para não perder nada se a página fechar
+        salvar_progresso_cookie()
 
 
 def garantir_todas_respostas_salvas():
@@ -360,7 +364,6 @@ def callback_avancar_tema():
 # INTERFACE GRÁFICA (UI)
 # ==============================================================================
 
-# Cabeçalho com Logo Pequena na Lateral Esquerda ao Lado do Título
 col_logo, col_titulo = st.columns([1, 5])
 with col_logo:
     try:
@@ -377,9 +380,10 @@ aba_pesquisa, aba_admin = st.tabs(["📝 Responder Pesquisa", "⚙️ Painel de 
 # ABA 1: FLUXO DO COLABORADOR
 # ------------------------------------------------------------------------------
 with aba_pesquisa:
-    all_cookies = cookie_manager.get_all() if cookie_manager else {}
+    all_cookies = cookie_manager.get_all() if cookie_manager else None
 
-    if not st.session_state.restaurado and all_cookies:
+    # RESTAURAÇÃO DE SESSÃO E COOKIES (Acontece assim que o navegador lê o armazenamento)
+    if not st.session_state.restaurado and all_cookies is not None:
         if all_cookies.get(RODADA_ATUAL) == "respondido":
             st.session_state.enviado = True
             st.session_state.restaurado = True
@@ -390,19 +394,26 @@ with aba_pesquisa:
 
             if saved_sessao:
                 st.session_state.id_sessao = saved_sessao
+
             if saved_bloco is not None:
                 try:
                     st.session_state.bloco_index = int(saved_bloco)
                 except ValueError:
                     pass
+
             if saved_resp:
                 try:
-                    st.session_state.respostas = json.loads(saved_resp)
+                    respostas_carregadas = json.loads(saved_resp)
+                    st.session_state.respostas = respostas_carregadas
                     st.session_state.respostas_enviadas = {
-                        k: str(v).strip() for k, v in st.session_state.respostas.items() if v
+                        k: str(v).strip() for k, v in respostas_carregadas.items() if v
                     }
-                except Exception:
-                    pass
+                    # INJEÇÃO DIRETA NA INTERFACE: Força os widgets a mostrarem as opções salvas
+                    for q_key, val in respostas_carregadas.items():
+                        ui_key = f"ui_{q_key}"
+                        st.session_state[ui_key] = val
+                except Exception as e:
+                    logger.warning("Falha ao decodificar respostas do cookie: %s", e)
 
             if saved_bloco is not None or saved_sessao is not None or saved_resp is not None:
                 st.session_state.restaurado = True
@@ -468,8 +479,9 @@ with aba_pesquisa:
                     options = [str(opt).strip() for opt in q["opcoes"]]
                     saved_val = st.session_state.respostas.get(q_key)
 
-                    if saved_val and str(saved_val).strip() in options and ui_key not in st.session_state:
-                        st.session_state[ui_key] = str(saved_val).strip()
+                    if saved_val and str(saved_val).strip() in options:
+                        if ui_key not in st.session_state or not st.session_state[ui_key]:
+                            st.session_state[ui_key] = str(saved_val).strip()
 
                     idx_default = options.index(st.session_state[ui_key]) if ui_key in st.session_state and st.session_state[ui_key] in options else None
 
@@ -485,7 +497,7 @@ with aba_pesquisa:
 
                 elif q["tipo"] == "aberta":
                     saved_val = str(st.session_state.respostas.get(q_key, ""))
-                    if saved_val and ui_key not in st.session_state:
+                    if saved_val and (ui_key not in st.session_state or not st.session_state[ui_key]):
                         st.session_state[ui_key] = saved_val
 
                     resposta_texto = st.text_area(
