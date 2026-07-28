@@ -390,7 +390,7 @@ with aba_pesquisa:
     else:
         # ---------------- TELA DE BOAS-VINDAS ----------------
         if st.session_state.bloco_index == -1:
-            st.markdown("### Seja bem-vindo(a) à nossa Pesquisa de Clima Organizacional – Ciclo 2026")
+            st.markdown("### Sejam bem-vindos(a) à nossa Pesquisa de Clima Organizacional – Ciclo 2026")
             st.write("Esta pesquisa é um espaço para você dizer, com liberdade, como está sendo a sua experiência aqui no Barracuda. Sua opinião é o que orienta decisões estratégicas sobre o que precisa melhorar e o que vale a pena manter.")
 
             st.markdown("#### 🔒 É confidencial")
@@ -405,9 +405,9 @@ with aba_pesquisa:
 
             st.markdown("---")
             st.markdown("### Nossa Identidade")
-            st.markdown('** Nossa Missão:** *"Proporcionar estadias transformadoras por meio da sabedoria e hospitalidade genuína dos baianos, e de experiências que promovam conexões autênticas com a natureza e a cultura local, além de contribuir com um legado positivo para Itacaré"*')
-            st.markdown("** Nossa Visão:** *Consolidar-se como um destino único, reconhecido globalmente*")
-            st.markdown("** Nossos Valores:**\n- Excelência em hospitalidade\n- Autenticidade\n- Integridade\n- Responsabilidade socioambiental\n- Inovação")
+            st.markdown('Nossa Missão: "Proporcionar estadias transformadoras por meio da sabedoria e hospitalidade genuína dos baianos, e de experiências que promovam conexões autênticas com a natureza e a cultura local, além de contribuir com um legado positivo para Itacaré"*')
+            st.markdown("Nossa Visão: Consolidar-se como um destino único, reconhecido globalmente*")
+            st.markdown("Nossos Valores:\n- Excelência em hospitalidade\n- Autenticidade\n- Integridade\n- Responsabilidade socioambiental\n- Inovação")
 
             st.markdown("---")
             st.write("")
