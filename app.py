@@ -36,7 +36,7 @@ st.markdown(f"""
         background-color: {COR_FUNDO} !important;
     }}
     
-    /* ELIMINAÇÃO DEFINITIVA DOS PULOS DE TELA: Oculta a área do Cookie Manager da estrutura visual */
+    /* Oculta a área visual do Cookie Manager para evitar pulos na tela */
     iframe[title*="cookie_manager"], 
     iframe[title*="extra_streamlit_components"],
     div[data-testid="stCustomComponentV1"] iframe {{
@@ -60,7 +60,7 @@ st.markdown(f"""
         color: #FFFFFF !important;
     }}
     
-    /* Fundo BRANCO com texto PRETO para Caixas de Texto (Perguntas Abertas e Campo de Senha RH) */
+    /* Fundo BRANCO com texto PRETO para Caixas de Texto */
     div[data-baseweb="textarea"], textarea,
     div[data-baseweb="input"], input, input[type="password"], input[type="text"] {{
         background-color: #FFFFFF !important;
@@ -68,7 +68,7 @@ st.markdown(f"""
         border-radius: 6px !important;
     }}
 
-    /* Fundo BRANCO com texto PRETO para Caixas de Alerta, Avisos e Carregamento */
+    /* Fundo BRANCO com texto PRETO para Caixas de Alerta e Avisos */
     div[data-testid="stAlert"], .stAlert,
     div[data-testid="stSpinner"], div[data-testid="stStatusWidget"] {{
         background-color: #FFFFFF !important;
@@ -92,7 +92,7 @@ st.markdown(f"""
         transform: translateY(-1px) !important;
     }}
     
-    /* Estilização do Botão Voltar (Secundário) - Fundo BRANCO e Texto PRETO */
+    /* Estilização do Botão Voltar (Secundário) */
     div.stButton > button:not([kind="primary"]) {{
         background-color: #FFFFFF !important;
         color: #000000 !important;
@@ -128,7 +128,7 @@ st.markdown(f"""
 URL_WEB_APP = "https://script.google.com/macros/s/AKfycbzvxIXvcisyDL5ljMD8gSwYwKhF_bFdvKtG2M-_D1G7Rv26-TfFd-vYR-zxJ0PNIU-XtA/exec"
 SENHA_ADMIN = "RH2026"
 
-TIMEOUT_PADRAO = 12
+TIMEOUT_PADRAO = 10
 MAX_TENTATIVAS_LOGIN = 5
 BLOQUEIO_LOGIN_SEGUNDOS = 60
 
@@ -246,35 +246,34 @@ for chave, valor in _padroes.items():
 # COOKIES & GERENCIAMENTO DE RESPOSTAS
 # ==============================================================================
 def salvar_progresso_cookie():
-    """Salva silenciosamente no navegador o estado completo da sessão."""
+    """Salva com chaves estáticas para evitar o acúmulo de componentes na memória do Streamlit."""
     if not cookie_manager or st.session_state.enviado:
         return
     try:
-        now_ts = str(time.time())
         cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val=str(st.session_state.bloco_index),
-                           max_age=7776000, key=f"ck_bl_{now_ts}")
+                           max_age=7776000, key="ck_bl_set")
         cookie_manager.set(cookie=f"{RODADA_ATUAL}_sessao", val=str(st.session_state.id_sessao),
-                           max_age=7776000, key=f"ck_se_{now_ts}")
+                           max_age=7776000, key="ck_se_set")
         cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val=json.dumps(st.session_state.respostas),
-                           max_age=7776000, key=f"ck_re_{now_ts}")
+                           max_age=7776000, key="ck_re_set")
     except Exception as e:
         logger.warning("Falha ao salvar cookies de progresso: %s", e)
 
 
 def limpar_cookies_progresso():
+    """Limpa os cookies temporários pós-envio usando chaves estáticas."""
     if not cookie_manager:
         return
     try:
-        now_end = str(time.time())
-        cookie_manager.set(cookie=RODADA_ATUAL, val="respondido", max_age=7776000, key=f"ck_done_{now_end}")
-        cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val="", max_age=0, key=f"ck_del_bl_{now_end}")
-        cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val="", max_age=0, key=f"ck_del_re_{now_end}")
+        cookie_manager.set(cookie=RODADA_ATUAL, val="respondido", max_age=7776000, key="ck_done_set")
+        cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val="", max_age=0, key="ck_del_bl_set")
+        cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val="", max_age=0, key="ck_del_re_set")
     except Exception as e:
         logger.warning("Falha ao limpar cookies: %s", e)
 
 
 def _enviar_resposta_background_sem_retry(payload: dict):
-    ok, _ = _chamar_api(payload=payload, method="POST", timeout=12, tentativas=1)
+    ok, _ = _chamar_api(payload=payload, method="POST", timeout=10, tentativas=1)
     if not ok:
         st.session_state.envios_pendentes.append(payload)
 
@@ -321,17 +320,19 @@ def salvar_resposta_se_necessario(q_id: int, bloco: str, texto: str, val_clean: 
         reenviar_pendentes()
         threading.Thread(target=_enviar_resposta_background_sem_retry, args=(payload,), daemon=True).start()
     else:
-        _chamar_api(payload=payload, method="POST", timeout=12, tentativas=1)
+        _chamar_api(payload=payload, method="POST", timeout=10, tentativas=1)
 
 
 def garantir_todas_respostas_salvas():
+    """Varre e envia em background apenas as perguntas que ainda não foram marcadas como enviadas."""
     for q in PERGUNTAS_RAW:
         q_id = int(q["id"])
         q_key = f"q_{q_id}"
         val = st.session_state.respostas.get(q_key)
         if val and str(val).strip():
             bloco_nome = q.get("bloco", "Geral").strip()
-            salvar_resposta_se_necessario(q_id, bloco_nome, q.get("texto", "").strip(), str(val).strip(), assincrono=False)
+            # Envia de forma rápida para não congelar o servidor
+            salvar_resposta_se_necessario(q_id, bloco_nome, q.get("texto", "").strip(), str(val).strip(), assincrono=True)
 
 
 def verificar_bloco_completo(blocos_perguntas: list) -> bool:
@@ -511,8 +512,6 @@ with aba_pesquisa:
 
                 st.write("")
 
-            salvar_progresso_cookie()
-
             st.markdown("---")
             col_ant, _, col_prox = st.columns([1, 1, 1])
 
@@ -548,7 +547,7 @@ with aba_pesquisa:
                                 }
                                 ok, resposta_api = _chamar_api(payload=payload, method="POST", timeout=12, tentativas=2)
 
-                                # VALIDAÇÃO ROBUSTA DA RESPOSTA DA API (Suporta Strings, Dicts e Bools)
+                                # VALIDAÇÃO FLEXÍVEL DA RESPOSTA DA API
                                 sucesso = False
                                 if ok:
                                     if isinstance(resposta_api, dict):
