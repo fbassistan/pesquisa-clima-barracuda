@@ -43,11 +43,21 @@ st.markdown(f"""
         color: #000000 !important;
     }}
     
-    /* Fundo BRANCO com texto PRETO para Caixas de Texto (Perguntas Abertas) */
-    div[data-baseweb="textarea"], textarea {{
+    /* Fundo BRANCO com texto PRETO para Caixas de Texto (Perguntas Abertas e Campo de Senha RH) */
+    div[data-baseweb="textarea"], textarea,
+    div[data-baseweb="input"], input, input[type="password"], input[type="text"] {{
         background-color: #FFFFFF !important;
         color: #000000 !important;
         border-radius: 6px !important;
+    }}
+
+    /* Fundo BRANCO com texto PRETO para Caixas de Alerta, Avisos e Carregamento */
+    div[data-testid="stAlert"], .stAlert,
+    div[data-testid="stSpinner"], div[data-testid="stStatusWidget"] {{
+        background-color: #FFFFFF !important;
+        color: #000000 !important;
+        border: 1px solid #CCCCCC !important;
+        border-radius: 8px !important;
     }}
 
     /* Estilização dos Botões Principais - Avançar / Concluir */
