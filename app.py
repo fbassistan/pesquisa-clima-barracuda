@@ -43,6 +43,11 @@ st.markdown(f"""
         color: #000000 !important;
     }}
     
+    /* Exceção: Letra BRANCA para caixas/elementos com fundo escuro ou preto (ex: código embutido, tooltips) */
+    code, pre, code *, pre *, kbd, [data-testid="stCode"] *, [data-baseweb="tooltip"] * {{
+        color: #FFFFFF !important;
+    }}
+    
     /* Fundo BRANCO com texto PRETO para Caixas de Texto (Perguntas Abertas e Campo de Senha RH) */
     div[data-baseweb="textarea"], textarea,
     div[data-baseweb="input"], input, input[type="password"], input[type="text"] {{
