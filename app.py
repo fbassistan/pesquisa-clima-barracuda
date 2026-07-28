@@ -234,7 +234,7 @@ for chave, valor in _padroes.items():
 # COOKIES & GERENCIAMENTO DE RESPOSTAS
 # ==============================================================================
 def salvar_progresso_cookie():
-    """Salva o progresso no navegador no instante da navegação ou resposta."""
+    """Salva o progresso no navegador no momento de transição de tela."""
     if not cookie_manager or st.session_state.enviado:
         return
     try:
@@ -312,15 +312,6 @@ def salvar_resposta_se_necessario(q_id: int, bloco: str, texto: str, val_clean: 
         _chamar_api(payload=payload, method="POST", timeout=12, tentativas=1)
 
 
-def auto_salvar_resposta(q_id: int, bloco: str, texto: str, tipo: str):
-    ui_key = f"ui_q_{q_id}"
-    valor_raw = st.session_state.get(ui_key)
-    if valor_raw is not None and str(valor_raw).strip() != "":
-        salvar_resposta_se_necessario(q_id, bloco, texto, str(valor_raw).strip(), assincrono=True)
-        # Salva o cookie em tempo real para não perder nada se a página fechar
-        salvar_progresso_cookie()
-
-
 def garantir_todas_respostas_salvas():
     for q in PERGUNTAS_RAW:
         q_id = int(q["id"])
@@ -382,7 +373,7 @@ aba_pesquisa, aba_admin = st.tabs(["📝 Responder Pesquisa", "⚙️ Painel de 
 with aba_pesquisa:
     all_cookies = cookie_manager.get_all() if cookie_manager else None
 
-    # RESTAURAÇÃO DE SESSÃO E COOKIES (Acontece assim que o navegador lê o armazenamento)
+    # RESTAURAÇÃO SILENCIOSA DE COOKIES AO CARREGAR
     if not st.session_state.restaurado and all_cookies is not None:
         if all_cookies.get(RODADA_ATUAL) == "respondido":
             st.session_state.enviado = True
@@ -408,7 +399,6 @@ with aba_pesquisa:
                     st.session_state.respostas_enviadas = {
                         k: str(v).strip() for k, v in respostas_carregadas.items() if v
                     }
-                    # INJEÇÃO DIRETA NA INTERFACE: Força os widgets a mostrarem as opções salvas
                     for q_key, val in respostas_carregadas.items():
                         ui_key = f"ui_{q_key}"
                         st.session_state[ui_key] = val
@@ -485,11 +475,10 @@ with aba_pesquisa:
 
                     idx_default = options.index(st.session_state[ui_key]) if ui_key in st.session_state and st.session_state[ui_key] in options else None
 
+                    # Sem on_change para manter a página 100% estática e sem pulos
                     resposta = st.radio(
                         label=q["texto"], label_visibility="collapsed",
-                        options=options, index=idx_default, key=ui_key,
-                        on_change=auto_salvar_resposta,
-                        args=(q_id, bloco_nome, q["texto"], q["tipo"]),
+                        options=options, index=idx_default, key=ui_key
                     )
 
                     if resposta:
@@ -500,10 +489,9 @@ with aba_pesquisa:
                     if saved_val and (ui_key not in st.session_state or not st.session_state[ui_key]):
                         st.session_state[ui_key] = saved_val
 
+                    # Sem on_change para manter a digitação sem re-renders
                     resposta_texto = st.text_area(
-                        label=q["texto"], label_visibility="collapsed", key=ui_key,
-                        on_change=auto_salvar_resposta,
-                        args=(q_id, bloco_nome, q["texto"], q["tipo"]),
+                        label=q["texto"], label_visibility="collapsed", key=ui_key
                     )
 
                     if resposta_texto and resposta_texto.strip():
@@ -525,7 +513,15 @@ with aba_pesquisa:
                 if st.session_state.bloco_index < len(LISTA_BLOCOS) - 1:
                     if st.button("Avançar Tema ➡️", type="primary"):
                         if bloco_pronto:
-                            callback_avancar_tema()
+                            # Salva em lote as respostas do bloco e atualiza os cookies ao avançar
+                            for q_bloco in perguntas_atuais:
+                                q_id_b = int(q_bloco["id"])
+                                q_key_b = f"q_{q_id_b}"
+                                val_b = st.session_state.respostas.get(q_key_b, "")
+                                salvar_resposta_se_necessario(q_id_b, bloco_nome, q_bloco["texto"], val_b, assincrono=True)
+                            
+                            st.session_state.bloco_index += 1
+                            salvar_progresso_cookie()
                             st.rerun()
                         else:
                             st.warning("⚠️ Responda a todas as perguntas deste bloco (incluindo o campo de texto) para avançar.")
