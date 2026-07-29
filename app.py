@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("pesquisa_clima")
 
 # ➔ LINK DA SUA LOGO
-URL_OU_CAMINHO_LOGO = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRCoWtXmWKvlUcgGnpVEm56JhjQWztWcdAR6Q&" 
+URL_OU_CAMINHO_LOGO = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRCoWtXmWKvlUcgGnpVEm56JhjQWztWcdAR6Q&s" 
 
 # ➔ PALETA DE CORES DA EMPRESA
 COR_FUNDO = "#F5F5DC"          # Cor de Fundo da Aplicação
@@ -251,8 +251,8 @@ for chave, valor in _padroes.items():
 # COOKIES & GERENCIAMENTO DE RESPOSTAS
 # ==============================================================================
 def salvar_progresso_cookie():
-    """Grava o estado no navegador de forma controlada nas transições de tela."""
-    if not cookie_manager or st.session_state.enviado:
+    """Grava o progresso no navegador APENAS se a restauração inicial já foi concluída."""
+    if not cookie_manager or st.session_state.enviado or not st.session_state.restaurado:
         return
     try:
         cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val=str(st.session_state.bloco_index),
@@ -338,6 +338,7 @@ def auto_salvar_resposta(q_id: int, bloco: str, texto: str, tipo: str):
     if valor_raw is not None and str(valor_raw).strip() != "":
         val_clean = str(valor_raw).strip()
         salvar_resposta_se_necessario(q_id, bloco, texto, val_clean, assincrono=True)
+        salvar_progresso_cookie()
 
 
 def garantir_todas_respostas_salvas():
@@ -403,7 +404,7 @@ aba_pesquisa, aba_admin = st.tabs(["📝 Responder Pesquisa", "⚙️ Painel de 
 with aba_pesquisa:
     all_cookies = cookie_manager.get_all() if cookie_manager else None
 
-    # RESTAURAÇÃO DE PROGRESSO DO NAVEGADOR
+    # RESTAURAÇÃO DE PROGRESSO DO NAVEGADOR (EXECUTA APENAS UMA VEZ NO CARREGAMENTO INICIAL)
     if not st.session_state.restaurado and isinstance(all_cookies, dict) and len(all_cookies) > 0:
         if all_cookies.get(RODADA_ATUAL) == "respondido":
             st.session_state.enviado = True
@@ -413,12 +414,16 @@ with aba_pesquisa:
             saved_sessao = all_cookies.get(f"{RODADA_ATUAL}_sessao")
             saved_resp = all_cookies.get(f"{RODADA_ATUAL}_respostas")
 
+            tem_dados_para_restaurar = False
+
             if saved_sessao:
                 st.session_state.id_sessao = str(saved_sessao).strip()
+                tem_dados_para_restaurar = True
 
             if saved_bloco is not None:
                 try:
                     st.session_state.bloco_index = int(saved_bloco)
+                    tem_dados_para_restaurar = True
                 except ValueError:
                     pass
 
@@ -427,19 +432,21 @@ with aba_pesquisa:
                     respostas_carregadas = json.loads(saved_resp)
                     if isinstance(respostas_carregadas, dict):
                         st.session_state.respostas.update(respostas_carregadas)
-                        # Marca como enviadas para não duplicar chamadas à planilha ao reabrir
+                        # Registra no controle local para impedir reenvios duplicados à planilha
                         st.session_state.respostas_enviadas.update({
                             k: str(v).strip() for k, v in respostas_carregadas.items() if v
                         })
-                        # Carrega para a UI
+                        # Preenche os widgets da interface para o usuário ver de onde parou
                         for q_k, val in respostas_carregadas.items():
                             if val:
                                 st.session_state[f"ui_{q_k}"] = str(val).strip()
+                        tem_dados_para_restaurar = True
                 except Exception as e:
                     logger.warning("Falha ao carregar respostas anteriores do cookie: %s", e)
 
-            if saved_bloco is not None or saved_sessao is not None or saved_resp is not None:
+            if tem_dados_para_restaurar or saved_bloco is not None:
                 st.session_state.restaurado = True
+                st.rerun()
 
     if not st.session_state.id_sessao:
         st.session_state.id_sessao = f"S_{str(uuid.uuid4())[:8]}"
