@@ -36,7 +36,7 @@ st.markdown(f"""
         background-color: {COR_FUNDO} !important;
     }}
     
-    /* FIXAÇÃO E ESTABILIDADE DA TELA: Oculta totalmente o container de cookies */
+    /* FIXAÇÃO E ESTABILIDADE DA TELA: Oculta totalmente o container de cookies do fluxo do layout */
     div[data-testid="stCustomComponentV1"] {{
         display: none !important;
         height: 0px !important;
@@ -251,30 +251,28 @@ for chave, valor in _padroes.items():
 # COOKIES & GERENCIAMENTO DE RESPOSTAS
 # ==============================================================================
 def salvar_progresso_cookie():
-    """Grava o progresso no navegador de forma dinâmica para garantir atualização real do bloco."""
-    if not cookie_manager or st.session_state.enviado or not st.session_state.restaurado:
+    """Grava o estado no navegador de forma controlada nas transições de tela."""
+    if not cookie_manager or st.session_state.enviado:
         return
     try:
-        now_ts = str(time.time())
         cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val=str(st.session_state.bloco_index),
-                           max_age=7776000, key=f"ck_bl_{now_ts}")
+                           max_age=7776000, key="ck_bl_set")
         cookie_manager.set(cookie=f"{RODADA_ATUAL}_sessao", val=str(st.session_state.id_sessao),
-                           max_age=7776000, key=f"ck_se_{now_ts}")
+                           max_age=7776000, key="ck_se_set")
         cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val=json.dumps(st.session_state.respostas),
-                           max_age=7776000, key=f"ck_re_{now_ts}")
+                           max_age=7776000, key="ck_re_set")
     except Exception as e:
         logger.warning("Falha ao salvar cookies de progresso: %s", e)
 
 
 def limpar_cookies_progresso():
-    """Limpa os cookies temporários após o envio final."""
+    """Limpa os cookies temporários do progresso após o envio final."""
     if not cookie_manager:
         return
     try:
-        now_end = str(time.time())
-        cookie_manager.set(cookie=RODADA_ATUAL, val="respondido", max_age=7776000, key=f"ck_done_{now_end}")
-        cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val="", max_age=0, key=f"ck_del_bl_{now_end}")
-        cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val="", max_age=0, key=f"ck_del_re_{now_end}")
+        cookie_manager.set(cookie=RODADA_ATUAL, val="respondido", max_age=7776000, key="ck_done_set")
+        cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val="", max_age=0, key="ck_del_bl_set")
+        cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val="", max_age=0, key="ck_del_re_set")
     except Exception as e:
         logger.warning("Falha ao limpar cookies: %s", e)
 
@@ -295,7 +293,7 @@ def reenviar_pendentes():
 
 
 def salvar_resposta_se_necessario(q_id: int, bloco: str, texto: str, val_clean: str, assincrono: bool = True):
-    """Grava/substitui na planilha em segundo plano sem impactar a interface visual."""
+    """Envia a resposta garantindo substituição sem criar duplicatas."""
     if not val_clean or not str(val_clean).strip():
         return
 
@@ -307,6 +305,7 @@ def salvar_resposta_se_necessario(q_id: int, bloco: str, texto: str, val_clean: 
 
     st.session_state.respostas[q_key] = val_clean
 
+    # Aborta caso o valor exato já tenha sido transmitido anteriormente
     if st.session_state.respostas_enviadas.get(q_key) == val_clean:
         return
 
@@ -322,7 +321,7 @@ def salvar_resposta_se_necessario(q_id: int, bloco: str, texto: str, val_clean: 
         "enunciado": texto,
         "resposta": val_clean,
         "setor": "Geral",
-        "substituir": True
+        "substituir": True  # Instrução para a API substituir a resposta anterior se ela já existir
     }
 
     if assincrono:
@@ -333,13 +332,12 @@ def salvar_resposta_se_necessario(q_id: int, bloco: str, texto: str, val_clean: 
 
 
 def auto_salvar_resposta(q_id: int, bloco: str, texto: str, tipo: str):
-    """Callback de salvamento leve — Atualiza progresso e envia em background."""
+    """Callback acionado na interatividade dos widgets."""
     ui_key = f"ui_q_{q_id}"
     valor_raw = st.session_state.get(ui_key)
     if valor_raw is not None and str(valor_raw).strip() != "":
         val_clean = str(valor_raw).strip()
         salvar_resposta_se_necessario(q_id, bloco, texto, val_clean, assincrono=True)
-        salvar_progresso_cookie()
 
 
 def garantir_todas_respostas_salvas():
@@ -405,7 +403,7 @@ aba_pesquisa, aba_admin = st.tabs(["📝 Responder Pesquisa", "⚙️ Painel de 
 with aba_pesquisa:
     all_cookies = cookie_manager.get_all() if cookie_manager else None
 
-    # RESTAURAÇÃO DE PROGRESSO DO NAVEGADOR (EXECUTA UMA VEZ NO CARREGAMENTO INICIAL)
+    # RESTAURAÇÃO DE PROGRESSO DO NAVEGADOR
     if not st.session_state.restaurado and isinstance(all_cookies, dict) and len(all_cookies) > 0:
         if all_cookies.get(RODADA_ATUAL) == "respondido":
             st.session_state.enviado = True
@@ -415,16 +413,12 @@ with aba_pesquisa:
             saved_sessao = all_cookies.get(f"{RODADA_ATUAL}_sessao")
             saved_resp = all_cookies.get(f"{RODADA_ATUAL}_respostas")
 
-            tem_dados_para_restaurar = False
-
             if saved_sessao:
                 st.session_state.id_sessao = str(saved_sessao).strip()
-                tem_dados_para_restaurar = True
 
-            if saved_bloco is not None and str(saved_bloco).strip() != "":
+            if saved_bloco is not None:
                 try:
                     st.session_state.bloco_index = int(saved_bloco)
-                    tem_dados_para_restaurar = True
                 except ValueError:
                     pass
 
@@ -433,19 +427,19 @@ with aba_pesquisa:
                     respostas_carregadas = json.loads(saved_resp)
                     if isinstance(respostas_carregadas, dict):
                         st.session_state.respostas.update(respostas_carregadas)
+                        # Marca como enviadas para não duplicar chamadas à planilha ao reabrir
                         st.session_state.respostas_enviadas.update({
                             k: str(v).strip() for k, v in respostas_carregadas.items() if v
                         })
+                        # Carrega para a UI
                         for q_k, val in respostas_carregadas.items():
                             if val:
                                 st.session_state[f"ui_{q_k}"] = str(val).strip()
-                        tem_dados_para_restaurar = True
                 except Exception as e:
                     logger.warning("Falha ao carregar respostas anteriores do cookie: %s", e)
 
-            if tem_dados_para_restaurar or saved_bloco is not None:
+            if saved_bloco is not None or saved_sessao is not None or saved_resp is not None:
                 st.session_state.restaurado = True
-                st.rerun()
 
     if not st.session_state.id_sessao:
         st.session_state.id_sessao = f"S_{str(uuid.uuid4())[:8]}"
