@@ -470,8 +470,8 @@ with aba_pesquisa:
 
             st.markdown("---")
             st.markdown("### Nossa Identidade")
-            st.markdown("**Nossa Missão:** Proporcionar estadias transformadoras por meio da sabedoria e hospitalidade genuína dos baianos, e de experiências que promovam conexões autênticas com a natureza e a cultura local, além de contribuir com um legado positivo para Itacaré")
-            st.markdown("**Nossa Visão:** Consolidar-se como um destino único, reconhecido globalmente")
+            st.markdown("**Nossa Missão:** Proporcionar estadias transformadoras por meio da sabedoria e hospitalidade genuína dos baianos, e de experiências que promovam conexões autênticas com a natureza e a cultura local, além de contribuir com um legado positivo para Itacaré.")
+            st.markdown("**Nossa Visão:** Consolidar-se como um destino único, reconhecido globalmente.")
             st.markdown("**Nossos Valores:**\n- Excelência em hospitalidade\n- Autenticidade\n- Integridade\n- Responsabilidade socioambiental\n- Inovação")
 
             st.markdown("---")
