@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("pesquisa_clima")
 
 # ➔ LINK DA SUA LOGO
-URL_OU_CAMINHO_LOGO = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRCoWtXmWKvlUcgGnpVEm56JhjQWztWcdAR6Q&s" 
+URL_OU_CAMINHO_LOGO = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRCoWtXmWKvlUcgGnpVEm56JhjQWztWcdAR6Q&" 
 
 # ➔ PALETA DE CORES DA EMPRESA
 COR_FUNDO = "#F5F5DC"          # Cor de Fundo da Aplicação
