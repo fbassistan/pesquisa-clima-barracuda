@@ -251,16 +251,17 @@ for chave, valor in _padroes.items():
 # COOKIES & GERENCIAMENTO DE RESPOSTAS
 # ==============================================================================
 def salvar_progresso_cookie():
-    """Grava o progresso apenas na transição de blocos/telas para manter a página estável."""
+    """Grava o progresso no navegador de forma dinâmica para garantir atualização real do bloco."""
     if not cookie_manager or st.session_state.enviado or not st.session_state.restaurado:
         return
     try:
+        now_ts = str(time.time())
         cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val=str(st.session_state.bloco_index),
-                           max_age=7776000, key="ck_bl_set")
+                           max_age=7776000, key=f"ck_bl_{now_ts}")
         cookie_manager.set(cookie=f"{RODADA_ATUAL}_sessao", val=str(st.session_state.id_sessao),
-                           max_age=7776000, key="ck_se_set")
+                           max_age=7776000, key=f"ck_se_{now_ts}")
         cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val=json.dumps(st.session_state.respostas),
-                           max_age=7776000, key="ck_re_set")
+                           max_age=7776000, key=f"ck_re_{now_ts}")
     except Exception as e:
         logger.warning("Falha ao salvar cookies de progresso: %s", e)
 
@@ -270,9 +271,10 @@ def limpar_cookies_progresso():
     if not cookie_manager:
         return
     try:
-        cookie_manager.set(cookie=RODADA_ATUAL, val="respondido", max_age=7776000, key="ck_done_set")
-        cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val="", max_age=0, key="ck_del_bl_set")
-        cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val="", max_age=0, key="ck_del_re_set")
+        now_end = str(time.time())
+        cookie_manager.set(cookie=RODADA_ATUAL, val="respondido", max_age=7776000, key=f"ck_done_{now_end}")
+        cookie_manager.set(cookie=f"{RODADA_ATUAL}_bloco", val="", max_age=0, key=f"ck_del_bl_{now_end}")
+        cookie_manager.set(cookie=f"{RODADA_ATUAL}_respostas", val="", max_age=0, key=f"ck_del_re_{now_end}")
     except Exception as e:
         logger.warning("Falha ao limpar cookies: %s", e)
 
@@ -331,12 +333,13 @@ def salvar_resposta_se_necessario(q_id: int, bloco: str, texto: str, val_clean: 
 
 
 def auto_salvar_resposta(q_id: int, bloco: str, texto: str, tipo: str):
-    """Callback de salvamento leve — NÃO chama cookie para evitar o pulo de tela."""
+    """Callback de salvamento leve — Atualiza progresso e envia em background."""
     ui_key = f"ui_q_{q_id}"
     valor_raw = st.session_state.get(ui_key)
     if valor_raw is not None and str(valor_raw).strip() != "":
         val_clean = str(valor_raw).strip()
         salvar_resposta_se_necessario(q_id, bloco, texto, val_clean, assincrono=True)
+        salvar_progresso_cookie()
 
 
 def garantir_todas_respostas_salvas():
@@ -418,7 +421,7 @@ with aba_pesquisa:
                 st.session_state.id_sessao = str(saved_sessao).strip()
                 tem_dados_para_restaurar = True
 
-            if saved_bloco is not None:
+            if saved_bloco is not None and str(saved_bloco).strip() != "":
                 try:
                     st.session_state.bloco_index = int(saved_bloco)
                     tem_dados_para_restaurar = True
